@@ -1,0 +1,13 @@
+name = "nous-token-gateway"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+
+# D1 database for usage records
+[[d1_databases]]
+binding = "DB"
+database_name = "nous-token-usage"
+database_id = "" # fill after `wrangler d1 create nous-token-usage`
+
+# SIGNING_KEY: ECDSA P-256 private key in JWK format, stored as Worker secret.
+# Generate: node -e "crypto.subtle.generateKey({name:'ECDSA',namedCurve:'P-256'},true,['sign','verify']).then(k=>crypto.subtle.exportKey('jwk',k.privateKey)).then(j=>console.log(JSON.stringify(j)))"
+# Set: wrangler secret put SIGNING_KEY

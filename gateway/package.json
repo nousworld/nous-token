@@ -1,0 +1,14 @@
+{
+  "name": "nous-token-gateway",
+  "version": "0.1.0",
+  "description": "Transparent LLM API gateway — records real usage from provider responses",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^4",
+    "@cloudflare/workers-types": "^4"
+  }
+}

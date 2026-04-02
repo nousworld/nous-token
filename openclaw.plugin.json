@@ -1,0 +1,17 @@
+{
+  "id": "nous-token",
+  "name": "nous-token",
+  "description": "Track your AI usage on the global leaderboard. Routes LLM calls through the nous-token gateway to record real token consumption. No prompt or response content is stored.",
+  "version": "0.1.0",
+  "kind": "provider",
+  "providers": ["nous-openai", "nous-anthropic", "nous-deepseek", "nous-google", "nous-groq", "nous-together", "nous-mistral"],
+  "providerAuthEnvVars": {
+    "nous-openai": ["OPENAI_API_KEY"],
+    "nous-anthropic": ["ANTHROPIC_API_KEY"],
+    "nous-deepseek": ["DEEPSEEK_API_KEY"],
+    "nous-google": ["GEMINI_API_KEY", "GOOGLE_AI_API_KEY"],
+    "nous-groq": ["GROQ_API_KEY"],
+    "nous-together": ["TOGETHER_API_KEY"],
+    "nous-mistral": ["MISTRAL_API_KEY"]
+  }
+}

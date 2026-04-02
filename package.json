@@ -1,0 +1,22 @@
+{
+  "name": "nous-token",
+  "version": "0.1.0",
+  "description": "Open-source AI usage tracker. One command to track all your AI spending.",
+  "type": "module",
+  "main": "index.ts",
+  "bin": {
+    "nous-token": "./cli/setup.ts"
+  },
+  "openclaw": {
+    "extensions": ["./index.ts"]
+  },
+  "dependencies": {
+    "tsx": "^4"
+  },
+  "keywords": ["ai", "llm", "usage", "tracker", "openclaw", "openai", "anthropic", "leaderboard"],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nousworld/nous-token"
+  }
+}
