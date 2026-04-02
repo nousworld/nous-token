@@ -31,6 +31,24 @@ import { teeStreamForUsage } from "./stream";
 import { initDB, recordUsage, getMerkleState, type Env } from "./db";
 
 let dbReady = false;
+let cachedSigningKey: CryptoKey | null = null;
+
+async function getSigningKey(env: Env): Promise<CryptoKey | null> {
+  if (cachedSigningKey) return cachedSigningKey;
+  if (!env.SIGNING_KEY) return null;
+  try {
+    cachedSigningKey = await crypto.subtle.importKey(
+      "jwk",
+      JSON.parse(env.SIGNING_KEY),
+      { name: "ECDSA", namedCurve: "P-256" },
+      false,
+      ["sign"]
+    );
+    return cachedSigningKey;
+  } catch {
+    return null;
+  }
+}
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -99,13 +117,15 @@ export default {
     const isStreaming = contentType.includes("text/event-stream");
     const endpoint = parts.slice(2).join("/");
 
+    const signingKey = await getSigningKey(env);
+
     if (isStreaming && upstreamResponse.body) {
       const [clientStream, usagePromise] = teeStreamForUsage(upstreamResponse, provider);
 
       ctx.waitUntil(
         usagePromise.then((usage) => {
           if (usage) {
-            return recordUsage(env.DB, userHash, provider.name, usage, endpoint);
+            return recordUsage(env.DB, userHash, provider.name, usage, endpoint, signingKey ?? undefined);
           }
         })
       );
@@ -124,7 +144,7 @@ export default {
             const parsed = JSON.parse(text) as Record<string, unknown>;
             const usage = provider.extractUsage(parsed);
             if (usage && usage.totalTokens > 0) {
-              await recordUsage(env.DB, userHash, provider.name, usage, endpoint);
+              await recordUsage(env.DB, userHash, provider.name, usage, endpoint, signingKey ?? undefined);
             }
           } catch {
             // Not JSON or no usage — fine
@@ -223,6 +243,47 @@ async function handleAPI(request: Request, url: URL, env: Env): Promise<Response
     return json({ ok: true, data: rows.results, user_hash: hash });
   }
 
+  // GET /api/user/:hash/receipts — signed receipts for a user
+  // Each receipt is independently verifiable with the gateway's public key.
+  const receiptsMatch = url.pathname.match(/^\/api\/user\/([a-f0-9]+)\/receipts$/);
+  if (receiptsMatch) {
+    const hash = receiptsMatch[1];
+    const afterId = parseInt(url.searchParams.get("after") || "0");
+    const limit = Math.min(parseInt(url.searchParams.get("limit") || "100"), 1000);
+
+    const rows = await env.DB.prepare(
+      `SELECT id, timestamp, provider, model,
+              input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
+              total_tokens, leaf_hash, receipt_sig
+       FROM usage_records
+       WHERE user_hash = ? AND id > ?
+       ORDER BY id ASC
+       LIMIT ?`
+    ).bind(hash, afterId, limit).all();
+
+    return json({
+      ok: true,
+      data: (rows.results as Array<Record<string, unknown>>).map((r) => ({
+        p: "nous",
+        v: 1,
+        type: "receipt",
+        id: r.id,
+        ts: r.timestamp,
+        user: hash,
+        provider: r.provider,
+        model: r.model,
+        input: r.input_tokens,
+        output: r.output_tokens,
+        cache_read: r.cache_read_tokens,
+        cache_write: r.cache_write_tokens,
+        total: r.total_tokens,
+        leaf: r.leaf_hash,
+        sig: r.receipt_sig,
+      })),
+      has_more: rows.results.length === limit,
+    });
+  }
+
   // GET /api/records — export raw records for verification
   // Sentinels pull this to independently recompute leaf hashes and rebuild the MMR.
   if (url.pathname === "/api/records") {
@@ -232,7 +293,7 @@ async function handleAPI(request: Request, url: URL, env: Env): Promise<Response
     const rows = await env.DB.prepare(
       `SELECT id, timestamp, user_hash, provider, model,
               input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
-              total_tokens, leaf_hash
+              total_tokens, leaf_hash, receipt_sig
        FROM usage_records
        WHERE id > ?
        ORDER BY id ASC
@@ -258,32 +319,58 @@ async function handleAPI(request: Request, url: URL, env: Env): Promise<Response
   }
 
   // POST /api/sign — gateway signs a user's usage summary for on-chain proof
-  // The signature proves this data came from the gateway, not fabricated by the user.
-  // Verify with the gateway's public key (published at /api/pubkey).
+  // Optional convenience: aggregates receipts into a signed summary.
+  // Individual receipts (via /api/user/:hash/receipts) are already signed per-call.
   if (url.pathname === "/api/sign" && request.method === "POST") {
     if (!env.SIGNING_KEY) {
       return json({ error: "Signing not configured" }, 501);
     }
 
     try {
-      const body = await request.json() as { user_hash?: string };
+      const body = await request.json() as { user_hash?: string; receipt_ids?: number[] };
       const userHash = body.user_hash;
       if (!userHash || !/^[a-f0-9]{32}$/.test(userHash)) {
         return json({ error: "Invalid user_hash" }, 400);
       }
 
-      // Fetch this user's aggregated stats
-      const rows = await env.DB.prepare(
-        `SELECT provider, model,
-                SUM(input_tokens) as input_tokens,
-                SUM(output_tokens) as output_tokens,
-                SUM(total_tokens) as total_tokens,
-                COUNT(*) as call_count
-         FROM usage_records
-         WHERE user_hash = ?
-         GROUP BY provider, model
-         ORDER BY total_tokens DESC`
-      ).bind(userHash).all();
+      // If receipt_ids provided, summarize only those receipts
+      // Otherwise, summarize all receipts for this user
+      let rows;
+      if (body.receipt_ids && body.receipt_ids.length > 0) {
+        if (!Array.isArray(body.receipt_ids)
+          || body.receipt_ids.length > 100
+          || !body.receipt_ids.every((id: unknown) => typeof id === "number" && Number.isInteger(id))) {
+          return json({ error: "receipt_ids must be an array of up to 100 integers" }, 400);
+        }
+        const placeholders = body.receipt_ids.map(() => "?").join(",");
+        rows = await env.DB.prepare(
+          `SELECT provider, model,
+                  SUM(input_tokens) as input_tokens,
+                  SUM(output_tokens) as output_tokens,
+                  SUM(total_tokens) as total_tokens,
+                  COUNT(*) as call_count,
+                  MIN(id) as first_id,
+                  MAX(id) as last_id
+           FROM usage_records
+           WHERE user_hash = ? AND id IN (${placeholders})
+           GROUP BY provider, model
+           ORDER BY total_tokens DESC`
+        ).bind(userHash, ...body.receipt_ids).all();
+      } else {
+        rows = await env.DB.prepare(
+          `SELECT provider, model,
+                  SUM(input_tokens) as input_tokens,
+                  SUM(output_tokens) as output_tokens,
+                  SUM(total_tokens) as total_tokens,
+                  COUNT(*) as call_count,
+                  MIN(id) as first_id,
+                  MAX(id) as last_id
+           FROM usage_records
+           WHERE user_hash = ?
+           GROUP BY provider, model
+           ORDER BY total_tokens DESC`
+        ).bind(userHash).all();
+      }
 
       if (!rows.results || rows.results.length === 0) {
         return json({ error: "No data for this user" }, 404);
@@ -295,36 +382,32 @@ async function handleAPI(request: Request, url: URL, env: Env): Promise<Response
         totalCalls += r.call_count || 0;
       }
 
-      // Build the proof payload (this is what goes on-chain)
       const proof = {
         p: "nous",
         v: 1,
-        op: "proof",
+        type: "summary",
         user: userHash,
         total_tokens: totalTokens,
         total_calls: totalCalls,
         models: (rows.results as Array<Record<string, unknown>>).map((r) => ({
           provider: r.provider,
           model: r.model,
-          total_tokens: r.total_tokens,
+          tokens: r.total_tokens,
+          calls: r.call_count,
         })),
         ts: Math.floor(Date.now() / 1000),
       };
 
       const proofString = JSON.stringify(proof);
 
-      // Sign with ECDSA P-256
-      const privateKey = await crypto.subtle.importKey(
-        "jwk",
-        JSON.parse(env.SIGNING_KEY),
-        { name: "ECDSA", namedCurve: "P-256" },
-        false,
-        ["sign"]
-      );
+      const signingKey = await getSigningKey(env);
+      if (!signingKey) {
+        return json({ error: "Signing key unavailable" }, 500);
+      }
 
       const sigBuffer = await crypto.subtle.sign(
         { name: "ECDSA", hash: "SHA-256" },
-        privateKey,
+        signingKey,
         new TextEncoder().encode(proofString)
       );
 

@@ -303,13 +303,14 @@ async function loadLeaderboard(days) {
       var cost = (row.input_tokens || 0) * 3 / 1000000 + (row.output_tokens || 0) * 12 / 1000000;
       html += '<tr onclick="lookupFromBoard(\'' + row.user_hash + '\')" style="cursor:pointer">'
         + '<td class="rank' + rankClass + '">' + (i+1) + '</td>'
-        + '<td class="user-hash">' + row.user_hash + '</td>'
+        + '<td class="user-hash">' + escapeHtml(row.user_hash) + '</td>'
         + '<td class="tokens">' + formatNumber(row.total_tokens) + '</td>'
         + '<td style="color:var(--orange)">' + formatCost(cost) + '</td>'
         + '<td class="calls">' + formatNumber(row.call_count) + '</td>'
         + '<td class="bar-cell"><div class="bar-bg"><div class="bar-fill" style="width:' + pct + '%"></div></div></td>'
         + '</tr>';
     }
+    html += '</table>';
     html += '<div style="font-size:11px;color:#444;margin-top:8px">* Cost is estimated using blended average pricing. Click a user for per-model breakdown.</div>';
     el.innerHTML = html;
   } catch(e) {
@@ -351,6 +352,7 @@ async function loadModels(days) {
         + '<td class="bar-cell"><div class="bar-bg"><div class="bar-fill" style="width:' + pct + '%"></div></div></td>'
         + '</tr>';
     }
+    html += '</table>';
     html += '<div style="font-size:11px;color:#444;margin-top:8px">* Cost estimated from public pricing. Actual billing may vary by plan.</div>';
     el.innerHTML = html;
   } catch(e) {
@@ -411,9 +413,12 @@ async function lookupUser() {
 
     // Proof section
     html += '<div class="proof-section">';
-    html += '<div style="font-size:14px;color:var(--text);margin-bottom:12px">Want this on-chain?</div>';
-    html += '<button class="proof-btn" onclick="storeProof(\'' + escapeHtml(hash) + '\')">Store on BASE</button>';
-    html += '<div class="proof-desc">Gateway signs your usage data, you store proof + signature on BASE (~$0.01 gas). Anyone can verify the signature with the gateway\'s public key.</div>';
+    html += '<div style="font-size:14px;color:var(--text);margin-bottom:12px">Store on-chain</div>';
+    html += '<div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">';
+    html += '<button class="proof-btn" onclick="storeReceipts(this,\'' + escapeHtml(hash) + '\')">Store Receipts on BASE</button>';
+    html += '<button class="proof-btn" style="background:var(--surface);color:var(--accent);border:1px solid var(--accent)" onclick="storeSummary(this,\'' + escapeHtml(hash) + '\')">Store Summary on BASE</button>';
+    html += '</div>';
+    html += '<div class="proof-desc">Every API call generates a gateway-signed receipt. Store individual receipts or a summary on BASE (~$0.01 gas). Anyone can verify signatures with the gateway\'s public key.</div>';
     html += '</div>';
 
     el.innerHTML = html;
@@ -422,77 +427,101 @@ async function lookupUser() {
   }
 }
 
-// ── Store Proof on BASE ──
-async function storeProof(userHash) {
+// ── Store on BASE (shared wallet logic) ──
+async function sendToBase(btn, label, payload) {
   if (!window.ethereum) {
     alert('Please install MetaMask to store proof on-chain.');
     return;
   }
+  var origText = btn.textContent;
   try {
-    // 1. Request gateway-signed proof
-    var signBtn = document.querySelector('.proof-btn');
-    signBtn.textContent = 'Signing...';
-    signBtn.disabled = true;
-
-    var signRes = await fetch(API + '/api/sign', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_hash: userHash })
-    });
-    var signData = await signRes.json();
-    if (!signData.ok) {
-      alert('Gateway signing failed: ' + (signData.error || 'unknown'));
-      signBtn.textContent = 'Store on BASE';
-      signBtn.disabled = false;
-      return;
-    }
-
-    // 2. Connect wallet
-    signBtn.textContent = 'Connect wallet...';
+    btn.textContent = 'Connect wallet...';
+    btn.disabled = true;
     await window.ethereum.request({ method: 'eth_requestAccounts' });
 
-    // 3. Check we're on Base (chainId 8453)
     var chainId = await window.ethereum.request({ method: 'eth_chainId' });
     if (chainId !== '0x2105') {
       try {
         await window.ethereum.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: '0x2105' }] });
       } catch(e) {
         alert('Please switch to Base network in MetaMask.');
-        signBtn.textContent = 'Store on BASE';
-        signBtn.disabled = false;
+        btn.textContent = origText; btn.disabled = false;
         return;
       }
     }
 
-    // 4. Build calldata: proof + signature (both from gateway)
-    signBtn.textContent = 'Confirm in wallet...';
-    var onchain = JSON.stringify({
-      proof: signData.proof,
-      sig: signData.signature,
-      gateway: API
-    });
-
-    var hexData = '0x' + Array.from(new TextEncoder().encode(onchain)).map(function(b) { return b.toString(16).padStart(2, '0'); }).join('');
-
-    // 5. Send transaction to self with signed proof as calldata
+    btn.textContent = 'Confirm in wallet...';
+    var hexData = '0x' + Array.from(new TextEncoder().encode(JSON.stringify(payload))).map(function(b) { return b.toString(16).padStart(2, '0'); }).join('');
     var accounts = await window.ethereum.request({ method: 'eth_accounts' });
     await window.ethereum.request({
       method: 'eth_sendTransaction',
-      params: [{
-        from: accounts[0],
-        to: accounts[0],
-        value: '0x0',
-        data: hexData,
-      }]
+      params: [{ from: accounts[0], to: accounts[0], value: '0x0', data: hexData }]
     });
 
-    alert('Signed proof stored on BASE! Anyone can verify with the gateway public key at ' + API + '/api/pubkey');
-    signBtn.textContent = 'Store on BASE';
-    signBtn.disabled = false;
+    alert(label + ' stored on BASE! Verify signatures at ' + API + '/api/pubkey');
   } catch(e) {
-    var signBtn = document.querySelector('.proof-btn');
-    if (signBtn) { signBtn.textContent = 'Store on BASE'; signBtn.disabled = false; }
     if (e.code !== 4001) alert('Error: ' + e.message);
+  } finally {
+    btn.textContent = origText; btn.disabled = false;
+  }
+}
+
+// Store individual signed receipts on-chain
+async function storeReceipts(btn, userHash) {
+  btn.textContent = 'Fetching receipts...';
+  btn.disabled = true;
+  try {
+    var res = await fetch(API + '/api/user/' + userHash + '/receipts?limit=100');
+    var data = await res.json();
+    if (!data.ok || !data.data || data.data.length === 0) {
+      alert('No receipts found.');
+      btn.textContent = 'Store Receipts on BASE'; btn.disabled = false;
+      return;
+    }
+    // Filter to only signed receipts
+    var signed = data.data.filter(function(r) { return r.sig; });
+    if (signed.length === 0) {
+      alert('No signed receipts available.');
+      btn.textContent = 'Store Receipts on BASE'; btn.disabled = false;
+      return;
+    }
+    await sendToBase(btn, signed.length + ' receipt(s)', {
+      p: 'nous', v: 1, type: 'receipts',
+      user: userHash,
+      count: signed.length,
+      receipts: signed,
+      gateway: API
+    });
+  } catch(e) {
+    alert('Error: ' + e.message);
+    btn.textContent = 'Store Receipts on BASE'; btn.disabled = false;
+  }
+}
+
+// Store aggregated summary on-chain
+async function storeSummary(btn, userHash) {
+  btn.textContent = 'Signing summary...';
+  btn.disabled = true;
+  try {
+    var res = await fetch(API + '/api/sign', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_hash: userHash })
+    });
+    var data = await res.json();
+    if (!data.ok) {
+      alert('Signing failed: ' + (data.error || 'unknown'));
+      btn.textContent = 'Store Summary on BASE'; btn.disabled = false;
+      return;
+    }
+    await sendToBase(btn, 'Summary', {
+      proof: data.proof,
+      sig: data.signature,
+      gateway: API
+    });
+  } catch(e) {
+    alert('Error: ' + e.message);
+    btn.textContent = 'Store Summary on BASE'; btn.disabled = false;
   }
 }
 

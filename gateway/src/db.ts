@@ -21,6 +21,12 @@ export interface Env {
   SIGNING_KEY?: string;
 }
 
+export interface Receipt {
+  id: number;
+  leafHash: string;
+  signature: string;
+}
+
 interface Peak {
   height: number;
   hash: string;
@@ -54,6 +60,12 @@ export async function initDB(db: D1Database): Promise<void> {
     );
     INSERT OR IGNORE INTO merkle_state (id, peaks, merkle_root, leaf_count) VALUES (1, '[]', '', 0);
   `);
+  // Migration: add receipt_sig column for existing databases
+  try {
+    await db.exec(`ALTER TABLE usage_records ADD COLUMN receipt_sig TEXT NOT NULL DEFAULT ''`);
+  } catch {
+    // Column already exists
+  }
 }
 
 export async function recordUsage(
@@ -61,8 +73,9 @@ export async function recordUsage(
   userHash: string,
   provider: string,
   usage: UsageData,
-  endpoint: string
-): Promise<void> {
+  endpoint: string,
+  signingKey?: CryptoKey
+): Promise<Receipt | null> {
   const timestamp = new Date().toISOString();
 
   // Leaf hash: SHA-256 of record fields (independent, not chained)
@@ -78,11 +91,24 @@ export async function recordUsage(
     usage.totalTokens,
   ].join("|"));
 
-  // Insert record
-  await db
+  // Sign the leaf hash — this is the receipt signature
+  let receiptSig = "";
+  if (signingKey) {
+    const sigBuffer = await crypto.subtle.sign(
+      { name: "ECDSA", hash: "SHA-256" },
+      signingKey,
+      new TextEncoder().encode(leafHash)
+    );
+    receiptSig = Array.from(new Uint8Array(sigBuffer))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+  }
+
+  // Insert record with receipt signature
+  const result = await db
     .prepare(
-      `INSERT INTO usage_records (timestamp, user_hash, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, total_tokens, endpoint, leaf_hash)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO usage_records (timestamp, user_hash, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, total_tokens, endpoint, leaf_hash, receipt_sig)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .bind(
       timestamp,
@@ -95,12 +121,19 @@ export async function recordUsage(
       usage.cacheWriteTokens,
       usage.totalTokens,
       endpoint,
-      leafHash
+      leafHash,
+      receiptSig
     )
     .run();
 
   // Update MMR
   await appendToMMR(db, leafHash);
+
+  return {
+    id: result.meta.last_row_id as number,
+    leafHash,
+    signature: receiptSig,
+  };
 }
 
 // ── MMR Operations ──

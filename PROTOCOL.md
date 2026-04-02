@@ -1,46 +1,90 @@
-# nous-token Protocol v1
+# nous-token Protocol v2
 
 ## Overview
 
-nous-token is an open-source AI usage tracking system. An OpenClaw plugin routes LLM API calls through a transparent gateway that records real token consumption from provider responses. Users can optionally store gateway-signed usage proofs on-chain.
+nous-token is an open-source AI usage tracking protocol. A transparent gateway proxies LLM API calls, extracts real token consumption from provider responses, and signs a **receipt** for every call. Users own their receipts and decide what to store on-chain.
+
+The gateway guarantees data authenticity. It does not dictate storage format.
 
 ## How It Works
 
 ```
-User (OpenClaw) → Plugin → Gateway → LLM Provider
-                    ↓          ↓
-              hash(API key)  extract .usage
-              via X-Nous-User  from response
-                               ↓
-                          Store in D1 + update Merkle tree
-                               ↓
-                          Leaderboard website reads D1
-                          Sentinels verify Merkle root
+User → Plugin/CLI → Gateway → LLM Provider
+                      ↓            ↓
+               hash(API key)    extract .usage
+               X-Nous-User      from response
+                      ↓
+                sign receipt (ECDSA) + store in D1 + update Merkle tree
+                      ↓
+              User fetches receipts → decides what to store on-chain
 ```
+
+## The Receipt
+
+Every API call through the gateway produces a signed receipt:
+
+```json
+{
+  "p": "nous",
+  "v": 1,
+  "type": "receipt",
+  "id": 42,
+  "ts": "2026-04-02T12:00:00.000Z",
+  "user": "a1b2c3d4...",
+  "provider": "anthropic",
+  "model": "claude-opus-4-6",
+  "input": 5000,
+  "output": 2000,
+  "cache_read": 0,
+  "cache_write": 0,
+  "total": 7000,
+  "leaf": "sha256...",
+  "sig": "ecdsa_signature..."
+}
+```
+
+**Verification**: `leaf` = SHA-256(`ts|user|provider|model|input|output|cache_read|cache_write|total`). `sig` = ECDSA-P256-SHA256 signature over `leaf`. Verify with the gateway's public key at `/api/pubkey`.
+
+The gateway signs the leaf hash, not the JSON. This means:
+- Anyone can independently recompute `leaf` from the fields and verify it matches
+- The signature proves the gateway attested to this exact data
+- No ambiguity from JSON serialization differences
+
+## What the Gateway Guarantees
+
+1. **Token counts are real** — extracted from the actual provider response, not estimated
+2. **Receipts are signed** — ECDSA P-256 signature on each record's leaf hash
+3. **History is append-only** — Merkle Mountain Range makes deletion/modification detectable
+4. **Data is public** — anyone can pull all records and verify independently
+
+## What the Gateway Does NOT Dictate
+
+- What the user stores on-chain (individual receipts, summaries, or nothing)
+- How the user calculates cost (different plans have different rates)
+- What fields the user displays publicly
+- When the user stores proof
 
 ## Privacy by Structure
 
 Not by promise — by code. Audit the source:
 
-- **API Key**: Plugin computes SHA-256 hash locally, sends only the hash via X-Nous-User header. Gateway code never calls `request.headers.get("authorization")`.
-- **Prompts**: `request.body` is piped directly to the provider via `fetch()`. No `.text()`, `.json()`, or `.getReader()` is called on it.
-- **Responses (streaming)**: Stream is tee'd. One branch goes to user unchanged. The other buffers only the last 4KB to extract `.usage`. No code reads `.choices`, `.content`, `.message`.
-- **Responses (non-streaming)**: Full response body exists in Worker memory (V8 isolate, GC'd after request) to extract `.usage`. Code only accesses `.usage`/`.usageMetadata` fields. Infrastructure trust assumption is Cloudflare — same as any cloud provider.
-- **Storage**: D1 stores only: timestamp, user_hash, provider, model, token counts, leaf_hash, endpoint.
+- **API Key**: Plugin computes SHA-256 hash locally, sends only the hash via `X-Nous-User` header. Gateway code never reads `authorization` or `x-api-key`.
+- **Prompts**: `request.body` is piped directly to the provider. No `.text()`, `.json()`, or `.getReader()` is called on it.
+- **Responses (streaming)**: Tee'd. One branch to user unchanged, other buffers last 4KB to extract `.usage` only.
+- **Responses (non-streaming)**: Full body in Worker memory (V8 isolate, GC'd after request) to extract `.usage`. Never reads `.choices`, `.content`.
+- **Storage**: D1 stores: timestamp, user_hash, provider, model, token counts, leaf_hash, receipt_sig. No prompts, no responses, no keys.
 
 ## Tamper Detection: Merkle Mountain Range
 
-Each usage record gets a leaf hash: `SHA-256(timestamp|user_hash|provider|model|tokens...)`.
+Each receipt's `leaf` hash is appended to a Merkle Mountain Range (MMR). The MMR root changes if any single record is modified.
 
-Leaves are organized into a Merkle Mountain Range (MMR) — an append-only binary Merkle tree. Peaks (roots of complete subtrees) are maintained incrementally. The Merkle root is derived from all peaks.
+### Verification Levels
 
-Modifying any single record changes its leaf hash, which propagates through the tree and changes the root.
-
-### Verification
-
-- **Full verification**: Pull all records via `/api/records`, recompute all leaf hashes, rebuild the MMR, compare root with `/api/chain`. This is what sentinels do.
-- **Spot check**: Recompute a single record's leaf hash and compare with the stored `leaf_hash`. O(1).
-- **External anchoring**: Publish the Merkle root periodically (GitHub, Twitter, on-chain). Attackers cannot rewrite history without invalidating published roots.
+| Level | How | Cost |
+|---|---|---|
+| **Single receipt** | Recompute `leaf` from fields, verify `sig` with pubkey | O(1) |
+| **Full tree** | Pull all records, rebuild MMR, compare root | O(n) |
+| **External anchor** | Compare root with published root (GitHub, on-chain) | O(1) |
 
 ### Sentinel
 
@@ -50,61 +94,29 @@ Anyone can run an independent verifier:
 npx tsx sentinel.ts --watch
 ```
 
-The sentinel pulls all records, recomputes every leaf hash, rebuilds the MMR locally, and compares the root with the gateway's. No API key needed. All data is public.
+The sentinel verifies leaf hashes, receipt signatures, and Merkle root integrity. No API key needed.
+
+## On-Chain Storage
+
+Users choose how to store proof on BASE (or any EVM chain):
+
+### Option 1: Individual Receipts
+
+Fetch signed receipts via `/api/user/:hash/receipts`, store as calldata. Each receipt is independently verifiable.
+
+### Option 2: Summary
+
+Request a signed summary via `POST /api/sign`, store as calldata. The summary aggregates multiple receipts into a single signed attestation.
+
+Both options use self-to-self transactions with data as calldata. No smart contract needed — the ECDSA signature is the proof.
 
 ## Trust Model
 
-The gateway is operated centrally. Trust comes from:
-
 1. **Code is open-source** — anyone can audit
-2. **Merkle tree** — every record is hashed, tampering breaks the tree
-3. **Sentinels** — independent verifiers continuously monitor integrity
-4. **Gateway-signed proofs** — on-chain data is signed by the gateway's ECDSA key, verifiable by anyone
-
-## On-Chain Proof Format
-
-Users request a gateway-signed proof via `POST /api/sign`, then store it on BASE (or any EVM chain) as calldata in a self-to-self transaction.
-
-```json
-{
-  "proof": {
-    "p": "nous",
-    "v": 1,
-    "op": "proof",
-    "user": "<user_hash>",
-    "total_tokens": 2847500,
-    "total_calls": 147,
-    "models": [
-      { "provider": "anthropic", "model": "claude-opus-4-6", "total_tokens": 1500000 },
-      { "provider": "openai", "model": "gpt-4o", "total_tokens": 1347500 }
-    ],
-    "ts": 1743580800
-  },
-  "sig": "<ECDSA-P256-SHA256 signature hex>",
-  "gateway": "https://gateway.noustoken.com"
-}
-```
-
-Verification: fetch the gateway's public key from `/api/pubkey`, verify the signature against the proof JSON. If valid, this data was attested by the gateway — not fabricated by the user.
-
-No smart contract needed. The signature provides cryptographic proof of origin.
-
-## nous point
-
-nous points are calculated from gateway data:
-
-- Each recorded API call = nous points based on token count
-- Viewable on the leaderboard website
-- On-chain proof is optional — points exist in the gateway database regardless
-
-### Halving Schedule
-
-| Relay Count | nous points per relay |
-|---|---|
-| 1 — 1,000,000 | 100 |
-| 1,000,001 — 2,000,000 | 50 |
-| 2,000,001 — 3,000,000 | 25 |
-| 3,000,001+ | continues halving |
+2. **Per-call signatures** — every receipt is signed by the gateway
+3. **Merkle tree** — tampering with any record breaks the tree
+4. **Sentinels** — independent verifiers monitor continuously
+5. **On-chain anchoring** — published roots prevent history rewrites
 
 ## API Endpoints
 
@@ -114,16 +126,17 @@ nous points are calculated from gateway data:
 | `/api/leaderboard` | GET | Top users by total tokens |
 | `/api/models` | GET | Usage breakdown by model |
 | `/api/stats` | GET | Global totals |
-| `/api/user/{hash}` | GET | Single user stats |
-| `/api/records` | GET | Export raw records for verification |
-| `/api/chain` | GET | Current Merkle root and MMR state |
-| `/api/sign` | POST | Gateway-signed usage proof |
+| `/api/user/{hash}` | GET | Single user aggregated stats |
+| `/api/user/{hash}/receipts` | GET | Signed receipts (paginated) |
+| `/api/records` | GET | Raw records for sentinel verification |
+| `/api/chain` | GET | Merkle root and MMR state |
+| `/api/sign` | POST | Signed summary (optional aggregation) |
 | `/api/pubkey` | GET | Gateway's ECDSA public key |
 
 ## Auditing the Gateway
 
-Search the gateway source code to verify privacy claims:
-- `authorization`, `x-api-key` → never read, only forwarded in HTTP headers
-- `request.body` → only appears as argument to `fetch()` (piped, not consumed)
-- `.content`, `.choices`, `.message` → do not appear in any data-reading context
-- `headers.get()` → only called for `x-nous-user` and `content-type`
+Search the source to verify privacy claims:
+- `authorization`, `x-api-key` → never read, only forwarded
+- `request.body` → only as argument to `fetch()` (piped, not consumed)
+- `.content`, `.choices`, `.message` → absent from data-reading code
+- `headers.get()` → only for `x-nous-user` and `content-type`

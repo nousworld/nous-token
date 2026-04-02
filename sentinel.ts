@@ -27,6 +27,7 @@ interface Record {
   cache_write_tokens: number;
   total_tokens: number;
   leaf_hash: string;
+  receipt_sig?: string;
 }
 
 interface ChainState {
@@ -93,6 +94,36 @@ async function fetchJSON<T>(url: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+// ── Receipt Signature Verification ──
+
+async function getGatewayPubkey(gateway: string): Promise<CryptoKey | null> {
+  try {
+    const res = await fetchJSON<{ ok: boolean; algorithm: string; pubkey: JsonWebKey }>(
+      `${gateway}/api/pubkey`
+    );
+    if (!res.ok || !res.pubkey) return null;
+    return crypto.subtle.importKey(
+      "jwk",
+      res.pubkey,
+      { name: "ECDSA", namedCurve: "P-256" },
+      false,
+      ["verify"]
+    );
+  } catch {
+    return null;
+  }
+}
+
+async function verifyReceiptSig(pubkey: CryptoKey, leafHash: string, sig: string): Promise<boolean> {
+  const sigBytes = new Uint8Array(sig.match(/.{2}/g)!.map((b) => parseInt(b, 16)));
+  return crypto.subtle.verify(
+    { name: "ECDSA", hash: "SHA-256" },
+    pubkey,
+    sigBytes,
+    new TextEncoder().encode(leafHash)
+  );
+}
+
 // ── Verification ──
 
 async function verify(gateway: string): Promise<boolean> {
@@ -110,9 +141,19 @@ async function verify(gateway: string): Promise<boolean> {
   console.log(`[sentinel] Gateway reports: ${state.leaf_count} records, ${state.peak_count} peaks`);
   console.log(`[sentinel] Merkle root: ${state.merkle_root}`);
 
-  // 2. Pull all records and rebuild MMR
+  // 2. Fetch gateway public key for receipt signature verification
+  const pubkey = await getGatewayPubkey(gateway);
+  if (pubkey) {
+    console.log(`[sentinel] Gateway public key loaded — will verify receipt signatures`);
+  } else {
+    console.log(`[sentinel] No public key available — skipping receipt signature verification`);
+  }
+
+  // 3. Pull all records and rebuild MMR
   let afterId = 0;
   let verified = 0;
+  let sigVerified = 0;
+  let sigMissing = 0;
   let peaks: Peak[] = [];
 
   while (true) {
@@ -130,6 +171,18 @@ async function verify(gateway: string): Promise<boolean> {
         console.error(`  Computed: ${computed}`);
         console.error(`  Stored:   ${r.leaf_hash}`);
         return false;
+      }
+
+      // Verify receipt signature if available
+      if (pubkey && r.receipt_sig) {
+        const sigValid = await verifyReceiptSig(pubkey, r.leaf_hash, r.receipt_sig);
+        if (!sigValid) {
+          console.error(`[sentinel] RECEIPT SIGNATURE INVALID at record #${r.id}`);
+          return false;
+        }
+        sigVerified++;
+      } else if (!r.receipt_sig) {
+        sigMissing++;
       }
 
       // Append to local MMR
@@ -163,6 +216,10 @@ async function verify(gateway: string): Promise<boolean> {
   console.log(`[sentinel] ALL ${verified} RECORDS VERIFIED. Merkle tree intact.`);
   console.log(`[sentinel] Root: ${computedRoot}`);
   console.log(`[sentinel] Peaks: ${peaks.length} (heights: ${peaks.map((p) => p.height).join(", ")})`);
+  if (sigVerified > 0) {
+    console.log(`[sentinel] Receipt signatures verified: ${sigVerified}/${verified}` +
+      (sigMissing > 0 ? ` (${sigMissing} unsigned — pre-receipt records)` : ""));
+  }
   return true;
 }
 
