@@ -33,8 +33,9 @@ interface Peak {
 }
 
 export async function initDB(db: D1Database): Promise<void> {
-  await db.exec(`
-    CREATE TABLE IF NOT EXISTS usage_records (
+  // Use batch() for reliability on D1 remote — exec() with multiple statements can be flaky
+  await db.batch([
+    db.prepare(`CREATE TABLE IF NOT EXISTS usage_records (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       timestamp TEXT NOT NULL,
       user_hash TEXT NOT NULL,
@@ -46,32 +47,25 @@ export async function initDB(db: D1Database): Promise<void> {
       cache_write_tokens INTEGER NOT NULL DEFAULT 0,
       total_tokens INTEGER NOT NULL,
       endpoint TEXT NOT NULL,
-      leaf_hash TEXT NOT NULL DEFAULT ''
-    );
-    CREATE INDEX IF NOT EXISTS idx_usage_user ON usage_records(user_hash);
-    CREATE INDEX IF NOT EXISTS idx_usage_time ON usage_records(timestamp);
-    CREATE INDEX IF NOT EXISTS idx_usage_model ON usage_records(model);
-
-    CREATE TABLE IF NOT EXISTS merkle_state (
+      leaf_hash TEXT NOT NULL DEFAULT '',
+      receipt_sig TEXT NOT NULL DEFAULT ''
+    )`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_usage_user ON usage_records(user_hash)`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_usage_time ON usage_records(timestamp)`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_usage_model ON usage_records(model)`),
+    db.prepare(`CREATE TABLE IF NOT EXISTS merkle_state (
       id INTEGER PRIMARY KEY CHECK (id = 1),
       peaks TEXT NOT NULL DEFAULT '[]',
       merkle_root TEXT NOT NULL DEFAULT '',
       leaf_count INTEGER NOT NULL DEFAULT 0
-    );
-    INSERT OR IGNORE INTO merkle_state (id, peaks, merkle_root, leaf_count) VALUES (1, '[]', '', 0);
-
-    CREATE TABLE IF NOT EXISTS claim_codes (
+    )`),
+    db.prepare(`INSERT OR IGNORE INTO merkle_state (id, peaks, merkle_root, leaf_count) VALUES (1, '[]', '', 0)`),
+    db.prepare(`CREATE TABLE IF NOT EXISTS claim_codes (
       code TEXT PRIMARY KEY,
       user_hash TEXT NOT NULL,
       expires_at TEXT NOT NULL
-    );
-  `);
-  // Migration: add receipt_sig column for existing databases
-  try {
-    await db.exec(`ALTER TABLE usage_records ADD COLUMN receipt_sig TEXT NOT NULL DEFAULT ''`);
-  } catch {
-    // Column already exists
-  }
+    )`),
+  ]);
 }
 
 export async function recordUsage(

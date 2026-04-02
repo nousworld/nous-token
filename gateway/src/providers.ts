@@ -101,7 +101,7 @@ export const PROVIDER_SHORTCUTS: Record<string, string> = {
   groq:        "https://api.groq.com",
   together:    "https://api.together.xyz",
   mistral:     "https://api.mistral.ai",
-  openrouter:  "https://openrouter.ai/api",
+  openrouter:  "https://openrouter.ai",
   fireworks:   "https://api.fireworks.ai",
   perplexity:  "https://api.perplexity.ai",
   cohere:      "https://api.cohere.com",

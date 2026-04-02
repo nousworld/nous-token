@@ -10,7 +10,7 @@ import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 // Plugin computes SHA-256(apiKey) locally and sends only the hash
 // to the gateway via X-Nous-User header.
 
-const GATEWAY = "https://gateway.noustoken.com";
+const GATEWAY = "https://gateway.nousai.cc";
 
 // Built-in providers: prefix maps to gateway shortcut route
 const BUILTIN_PROVIDERS: Record<string, { prefix: string; api: string; envVars: string[] }> = {

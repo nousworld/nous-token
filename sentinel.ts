@@ -12,7 +12,7 @@
 //
 // Anyone can run this. No API key needed. All data is public.
 
-const DEFAULT_GATEWAY = "https://gateway.noustoken.com";
+const DEFAULT_GATEWAY = "https://gateway.nousai.cc";
 const POLL_INTERVAL_MS = 5 * 60 * 1000;
 
 interface Record {

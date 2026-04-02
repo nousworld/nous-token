@@ -13,7 +13,7 @@ import { join } from "path";
 import { execSync } from "child_process";
 import { createHash } from "crypto";
 
-const GATEWAY = "https://gateway.noustoken.com";
+const GATEWAY = "https://gateway.nousai.cc";
 const HOME = homedir();
 
 interface Tool {
@@ -82,7 +82,7 @@ const tools: Tool[] = [
         if (existsSync(sp)) {
           try {
             const content = JSON.parse(readFileSync(sp, "utf-8"));
-            if (content["openai.baseUrl"]?.includes("noustoken")) {
+            if (content["openai.baseUrl"]?.includes("nousai")) {
               return { success: true, message: "already configured" };
             }
             content["openai.baseUrl"] = `${GATEWAY}/openai/v1`;
@@ -154,11 +154,11 @@ function setShellEnv(key: string, value: string, toolName: string): ConfigResult
 
   if (existsSync(rcFile)) {
     const content = readFileSync(rcFile, "utf-8");
-    if (content.includes(`${key}=`) && content.includes("noustoken")) {
+    if (content.includes(`${key}=`) && content.includes("nousai")) {
       return { success: true, message: "already configured" };
     }
     // Remove old setting if exists
-    const lines = content.split("\n").filter(l => !l.includes(`${key}=`) || !l.includes("noustoken"));
+    const lines = content.split("\n").filter(l => !l.includes(`${key}=`) || !l.includes("nousai"));
     lines.push(`export ${key}="${value}"  # nous-token gateway`);
     writeFileSync(rcFile, lines.join("\n"));
   } else {
@@ -231,7 +231,7 @@ if (command === "claim") {
     console.log(`  \x1b[32mYour claim code: \x1b[1m${data.code}\x1b[0m`);
     console.log("");
     console.log("  Enter this code on the leaderboard website within 5 minutes.");
-    console.log(`  \x1b[4mhttps://noustoken.com\x1b[0m → Claim tab → Enter code`);
+    console.log(`  \x1b[4mhttps://token.nousai.cc\x1b[0m → Claim tab → Enter code`);
     console.log("");
   } catch (err) {
     console.log(`  \x1b[31mFailed to reach gateway:\x1b[0m ${err}`);
@@ -271,7 +271,7 @@ if (command === "claim") {
     }
 
     console.log("");
-    console.log(`  See your usage at \x1b[4mhttps://noustoken.com\x1b[0m`);
+    console.log(`  See your usage at \x1b[4mhttps://token.nousai.cc\x1b[0m`);
     console.log(`  To claim your identity on the leaderboard: \x1b[1mnpx nous-token claim\x1b[0m`);
     console.log(`  Run \x1b[1msource ~/.zshrc\x1b[0m to apply env changes in this terminal.`);
   } else {
