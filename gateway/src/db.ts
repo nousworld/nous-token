@@ -59,6 +59,12 @@ export async function initDB(db: D1Database): Promise<void> {
       leaf_count INTEGER NOT NULL DEFAULT 0
     );
     INSERT OR IGNORE INTO merkle_state (id, peaks, merkle_root, leaf_count) VALUES (1, '[]', '', 0);
+
+    CREATE TABLE IF NOT EXISTS claim_codes (
+      code TEXT PRIMARY KEY,
+      user_hash TEXT NOT NULL,
+      expires_at TEXT NOT NULL
+    );
   `);
   // Migration: add receipt_sig column for existing databases
   try {

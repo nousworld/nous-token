@@ -77,7 +77,7 @@ The gateway signs the leaf hash, not the JSON. This means:
 
 Not by promise — by code. Audit the source:
 
-- **API Key**: Plugin computes SHA-256 hash locally, sends only the hash via `X-Nous-User` header. Gateway code never reads `authorization` or `x-api-key`. The `X-Nous-Upstream` header (if used) is stripped before forwarding.
+- **API Key**: Plugin computes SHA-256 hash locally, sends only the hash via `X-Nous-User` header. If no `X-Nous-User` is present (e.g., Claude Code via base URL), the gateway reads the API key from `Authorization` header **solely** to compute the same hash. The key is never stored, logged, or retained — it exists in Worker memory only for the duration of one SHA-256 call, then is discarded by GC. The `X-Nous-Upstream` header (if used) is stripped before forwarding.
 - **Prompts**: `request.body` is piped directly to the provider. No `.text()`, `.json()`, or `.getReader()` is called on it.
 - **Responses (streaming)**: Tee'd. One branch to user unchanged, other buffers last 4KB to extract `.usage` only.
 - **Responses (non-streaming)**: Full body in Worker memory (V8 isolate, GC'd after request) to extract `.usage`. Never reads `.choices`, `.content`.
@@ -145,7 +145,7 @@ Both options use self-to-self transactions with data as calldata. No smart contr
 ## Auditing the Gateway
 
 Search the source to verify privacy claims:
-- `authorization`, `x-api-key` → never read, only forwarded
+- `authorization`, `x-api-key` → read only to compute user hash when `X-Nous-User` is absent; value is not stored or logged
 - `request.body` → only as argument to `fetch()` (piped, not consumed)
 - `.content`, `.choices`, `.message` → absent from data-reading code
 - `headers.get()` → only for `x-nous-user`, `x-nous-upstream`, and `content-type`

@@ -150,6 +150,7 @@ a:hover { text-decoration:underline; }
   <div class="tab active" onclick="showTab('leaderboard')">Leaderboard</div>
   <div class="tab" onclick="showTab('models')">Models</div>
   <div class="tab" onclick="showTab('lookup')">Look Up</div>
+  <div class="tab" onclick="showTab('claim')">Claim</div>
 </div>
 
 <div class="content">
@@ -182,8 +183,24 @@ a:hover { text-decoration:underline; }
     <div id="lookupContent">
       <div style="text-align:center;padding:32px;color:var(--muted)">
         Enter your user hash to see your AI usage breakdown.<br>
-        <span style="font-size:12px;margin-top:8px;display:block">Your hash is shown in the plugin logs when you first connect.</span>
+        <span style="font-size:12px;margin-top:8px;display:block">Find your hash: run <code style="background:var(--surface);padding:2px 6px;border-radius:4px">npx nous-token claim</code> in your terminal, or check the <code style="background:var(--surface);padding:2px 6px;border-radius:4px">x-nous-user-hash</code> response header.</span>
       </div>
+    </div>
+  </div>
+
+  <!-- Claim -->
+  <div class="section" id="sec-claim">
+    <div style="max-width:480px;margin:0 auto;text-align:center;padding:24px 0">
+      <div style="font-size:16px;font-weight:600;margin-bottom:8px">Claim your identity</div>
+      <div style="font-size:13px;color:var(--muted);margin-bottom:24px">
+        Run <code style="background:var(--surface);padding:2px 6px;border-radius:4px">npx nous-token claim</code> in your terminal to get a 6-digit code.<br>
+        This proves you own the API key behind a hash — without exposing the key.
+      </div>
+      <div class="search-row">
+        <input class="search-input" id="claimInput" placeholder="Enter 6-digit claim code" maxlength="6" style="text-align:center;font-size:24px;letter-spacing:8px;font-weight:700" onkeydown="if(event.key==='Enter')verifyClaim()">
+      </div>
+      <button class="proof-btn" style="margin-top:12px" onclick="verifyClaim()">Verify</button>
+      <div id="claimResult" style="margin-top:20px"></div>
     </div>
   </div>
 </div>
@@ -528,6 +545,34 @@ async function storeSummary(btn, userHash) {
   } catch(e) {
     alert('Error: ' + e.message);
     btn.textContent = 'Store Summary on BASE'; btn.disabled = false;
+  }
+}
+
+// ── Claim ──
+async function verifyClaim() {
+  var code = document.getElementById('claimInput').value.trim();
+  if (!code || !/^\d{6}$/.test(code)) {
+    document.getElementById('claimResult').innerHTML = '<div style="color:var(--orange)">Enter a 6-digit code.</div>';
+    return;
+  }
+  var el = document.getElementById('claimResult');
+  el.innerHTML = '<div style="color:var(--muted)">Verifying...</div>';
+  try {
+    var r = await fetch(API + '/api/claim/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: code })
+    });
+    var d = await r.json();
+    if (!d.ok || !d.user_hash) {
+      el.innerHTML = '<div style="color:#f87171">' + escapeHtml(d.error || 'Invalid or expired code') + '</div>';
+      return;
+    }
+    el.innerHTML = '<div style="color:var(--accent);font-size:15px;font-weight:600">Claimed!</div>'
+      + '<div style="font-family:monospace;font-size:14px;color:var(--accent);margin:8px 0;word-break:break-all">' + escapeHtml(d.user_hash) + '</div>'
+      + '<div style="margin-top:12px"><button class="proof-btn" onclick="lookupFromBoard(\'' + escapeHtml(d.user_hash) + '\')">View my usage & store on-chain</button></div>';
+  } catch(e) {
+    el.innerHTML = '<div style="color:#f87171">Failed to verify. Try again.</div>';
   }
 }
 

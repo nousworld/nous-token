@@ -55,22 +55,9 @@ const tools: Tool[] = [
       try { execSync("which claude", { stdio: "ignore" }); return true; } catch { return false; }
     },
     configure: () => {
-      const envFile = join(HOME, ".claude", ".env");
-      const claudeDir = join(HOME, ".claude");
-      if (!existsSync(claudeDir)) mkdirSync(claudeDir, { recursive: true });
-
-      // Check if already configured
-      if (existsSync(envFile)) {
-        const content = readFileSync(envFile, "utf-8");
-        if (content.includes("gateway.noustoken.com")) {
-          return { success: true, message: "already configured" };
-        }
-        // Append
-        appendFileSync(envFile, `\nANTHROPIC_BASE_URL=${GATEWAY}/anthropic\n`);
-      } else {
-        writeFileSync(envFile, `ANTHROPIC_BASE_URL=${GATEWAY}/anthropic\n`);
-      }
-      return { success: true, message: `set ANTHROPIC_BASE_URL in ~/.claude/.env` };
+      // Claude Code reads ANTHROPIC_BASE_URL from shell environment (process.env),
+      // not from ~/.claude/.env. Write to .zshrc/.bashrc like other tools.
+      return setShellEnv("ANTHROPIC_BASE_URL", `${GATEWAY}/anthropic`, "Claude Code");
     },
   },
 
@@ -130,7 +117,9 @@ const tools: Tool[] = [
         (() => { try { execSync("which gemini", { stdio: "ignore" }); return true; } catch { return false; } })();
     },
     configure: () => {
-      return setShellEnv("GEMINI_BASE_URL", `${GATEWAY}/gemini`, "Gemini CLI");
+      // Gemini CLI uses GOOGLE_GEMINI_BASE_URL (not GEMINI_BASE_URL)
+      // Must use API key auth, not OAuth (OAuth bypasses proxy)
+      return setShellEnv("GOOGLE_GEMINI_BASE_URL", `${GATEWAY}/gemini`, "Gemini CLI");
     },
   },
 
@@ -183,9 +172,9 @@ function setShellEnv(key: string, value: string, toolName: string): ConfigResult
   return { success: true, message: `set ${key} in ${rcName}` };
 }
 
-// ── Compute user hash from first available API key ──
+// ── Find first available API key ──
 
-function computeUserHash(): string | null {
+function findFirstApiKey(): string | null {
   const keys = [
     process.env.OPENAI_API_KEY,
     process.env.ANTHROPIC_API_KEY,
@@ -194,54 +183,100 @@ function computeUserHash(): string | null {
     process.env.GROQ_API_KEY,
   ];
   for (const key of keys) {
-    if (key) {
-      const clean = key.replace(/^Bearer\s+/i, "");
-      const hash = createHash("sha256").update(clean).digest("hex").slice(0, 32);
-      return hash;
-    }
+    if (key) return key.replace(/^Bearer\s+/i, "");
   }
   return null;
 }
 
-// ── Main ──
-
-console.log("");
-console.log("  \x1b[1mnous-token setup\x1b[0m");
-console.log("  Scanning for AI tools...\n");
-
-let configured = 0;
-let notFound = 0;
-
-for (const tool of tools) {
-  if (tool.detect()) {
-    const result = tool.configure();
-    if (result.success) {
-      console.log(`  \x1b[32m✓\x1b[0m ${tool.name.padEnd(20)} → ${result.message}`);
-      configured++;
-    } else {
-      console.log(`  \x1b[31m✗\x1b[0m ${tool.name.padEnd(20)} → ${result.message}`);
-    }
-  } else {
-    console.log(`  \x1b[90m-\x1b[0m \x1b[90m${tool.name.padEnd(20)} → not found\x1b[0m`);
-    notFound++;
-  }
+function computeUserHash(): string | null {
+  const key = findFirstApiKey();
+  if (!key) return null;
+  return createHash("sha256").update(key).digest("hex").slice(0, 32);
 }
 
-console.log("");
+// ── Main ──
 
-if (configured > 0) {
-  console.log(`  \x1b[32m${configured} tool(s) configured.\x1b[0m`);
+const command = process.argv[2] || "setup";
 
-  const hash = computeUserHash();
-  if (hash) {
-    console.log(`  Your user hash: \x1b[36m${hash}\x1b[0m`);
+if (command === "claim") {
+  // ── Claim: prove you own a hash on the leaderboard ──
+  // Sends API key in Authorization header — gateway computes hash from it.
+  // This proves you actually hold the key, not just know the hash.
+  const apiKey = findFirstApiKey();
+  if (!apiKey) {
+    console.log("\n  No API key found in environment. Set OPENAI_API_KEY, ANTHROPIC_API_KEY, or similar.\n");
+    process.exit(1);
+  }
+
+  const hash = createHash("sha256").update(apiKey.replace(/^Bearer\s+/i, "")).digest("hex").slice(0, 32);
+
+  console.log("");
+  console.log(`  \x1b[1mnous-token claim\x1b[0m`);
+  console.log(`  Your user hash: \x1b[36m${hash}\x1b[0m`);
+  console.log("  Requesting claim code...\n");
+
+  try {
+    const res = await fetch(`${GATEWAY}/api/claim`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+      },
+    });
+    const data = await res.json() as { ok?: boolean; code?: string; user_hash?: string; error?: string };
+    if (!data.ok || !data.code) {
+      console.log(`  \x1b[31mFailed:\x1b[0m ${data.error || "unknown error"}`);
+      console.log("  Make sure you've used the gateway at least once.\n");
+      process.exit(1);
+    }
+    console.log(`  \x1b[32mYour claim code: \x1b[1m${data.code}\x1b[0m`);
+    console.log("");
+    console.log("  Enter this code on the leaderboard website within 5 minutes.");
+    console.log(`  \x1b[4mhttps://noustoken.com\x1b[0m → Claim tab → Enter code`);
+    console.log("");
+  } catch (err) {
+    console.log(`  \x1b[31mFailed to reach gateway:\x1b[0m ${err}`);
+    console.log("");
+    process.exit(1);
+  }
+} else {
+  // ── Setup: configure AI tools ──
+  console.log("");
+  console.log("  \x1b[1mnous-token setup\x1b[0m");
+  console.log("  Scanning for AI tools...\n");
+
+  let configured = 0;
+
+  for (const tool of tools) {
+    if (tool.detect()) {
+      const result = tool.configure();
+      if (result.success) {
+        console.log(`  \x1b[32m✓\x1b[0m ${tool.name.padEnd(20)} → ${result.message}`);
+        configured++;
+      } else {
+        console.log(`  \x1b[31m✗\x1b[0m ${tool.name.padEnd(20)} → ${result.message}`);
+      }
+    } else {
+      console.log(`  \x1b[90m-\x1b[0m \x1b[90m${tool.name.padEnd(20)} → not found\x1b[0m`);
+    }
   }
 
   console.log("");
-  console.log(`  See your usage at \x1b[4mhttps://noustoken.com\x1b[0m`);
-  console.log(`  Run \x1b[1msource ~/.zshrc\x1b[0m to apply env changes in this terminal.`);
-} else {
-  console.log("  No AI tools found. Install OpenClaw, Claude Code, Cursor, or any OpenAI-compatible tool.");
-}
 
-console.log("");
+  if (configured > 0) {
+    console.log(`  \x1b[32m${configured} tool(s) configured.\x1b[0m`);
+
+    const hash = computeUserHash();
+    if (hash) {
+      console.log(`  Your user hash: \x1b[36m${hash}\x1b[0m`);
+    }
+
+    console.log("");
+    console.log(`  See your usage at \x1b[4mhttps://noustoken.com\x1b[0m`);
+    console.log(`  To claim your identity on the leaderboard: \x1b[1mnpx nous-token claim\x1b[0m`);
+    console.log(`  Run \x1b[1msource ~/.zshrc\x1b[0m to apply env changes in this terminal.`);
+  } else {
+    console.log("  No AI tools found. Install OpenClaw, Claude Code, Cursor, or any OpenAI-compatible tool.");
+  }
+
+  console.log("");
+}

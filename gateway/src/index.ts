@@ -2,8 +2,11 @@
 //
 // PRIVACY BY STRUCTURE (not by promise):
 //
-// 1. API Key: NEVER READ by gateway code. Plugin computes SHA-256 hash locally
-//    and sends it via X-Nous-User header. Gateway only reads X-Nous-User.
+// 1. API Key: When X-Nous-User header is present (plugin flow), gateway never
+//    reads the API key. When X-Nous-User is absent (direct base URL flow, e.g.
+//    Claude Code), gateway reads the key ONLY to compute SHA-256 hash for user
+//    identity — the key is never stored, logged, or retained beyond the hash
+//    computation. The hash matches what the plugin would have computed locally.
 //
 // 2. Request body (prompts): NEVER READ. request.body is piped directly to the
 //    provider via fetch(). No .text(), .json(), or reader.read() is called.
@@ -69,9 +72,22 @@ export default {
 
     // ── Proxy Logic ──
 
-    const userHash = request.headers.get("x-nous-user");
+    // User identity: prefer X-Nous-User header (plugin pre-computes hash).
+    // Fallback: compute hash from API key in Authorization header.
+    // This supports tools like Claude Code that can set base URL but not custom headers.
+    // The API key is ONLY used for hashing — never stored, logged, or forwarded differently.
+    let userHash = request.headers.get("x-nous-user");
     if (!userHash || !/^[a-f0-9]{32}$/.test(userHash)) {
-      return json({ error: "Missing or invalid X-Nous-User header. Install the nous-token plugin." }, 401);
+      // Try to compute from API key
+      const authHeader = request.headers.get("authorization")
+        || request.headers.get("x-api-key")
+        || request.headers.get("x-goog-api-key")  // Gemini
+        || "";
+      const rawKey = authHeader.replace(/^Bearer\s+/i, "");
+      if (!rawKey) {
+        return json({ error: "Missing X-Nous-User header and no API key found. Install the nous-token plugin or set ANTHROPIC_BASE_URL." }, 401);
+      }
+      userHash = await sha256Short(rawKey);
     }
 
     // Resolve upstream: shortcut prefix (e.g. /openai/v1/...) or X-Nous-Upstream header
@@ -130,6 +146,8 @@ export default {
     for (const [k, v] of Object.entries(corsHeaders())) {
       responseHeaders.set(k, v);
     }
+    // Tell the user their hash — so they can find themselves on the leaderboard
+    responseHeaders.set("x-nous-user-hash", userHash);
 
     if (!dbReady) {
       await initDB(env.DB);
@@ -459,6 +477,75 @@ async function handleAPI(request: Request, url: URL, env: Env): Promise<Response
     }
   }
 
+  // POST /api/claim — CLI generates a 6-digit claim code
+  // AUTHENTICATION: must include API key in Authorization header.
+  // Gateway computes hash from the key to prove ownership — you can only
+  // generate a claim code for your own hash. The key is not stored.
+  if (url.pathname === "/api/claim" && request.method === "POST") {
+    // Authenticate: compute hash from API key (same logic as proxy path)
+    const authHeader = request.headers.get("authorization")
+      || request.headers.get("x-api-key")
+      || request.headers.get("x-goog-api-key")
+      || "";
+    const rawKey = authHeader.replace(/^Bearer\s+/i, "");
+    if (!rawKey) {
+      return json({ error: "Authorization header required. Send your API key to prove ownership." }, 401);
+    }
+    const hash = await sha256Short(rawKey);
+
+    // Check that this user_hash actually exists in the database
+    const exists = await env.DB.prepare(
+      `SELECT 1 FROM usage_records WHERE user_hash = ? LIMIT 1`
+    ).bind(hash).first();
+    if (!exists) {
+      return json({ error: "No usage records for this hash. Use the gateway first." }, 404);
+    }
+
+    // Generate 6-digit code
+    const code = String(Math.floor(100000 + Math.random() * 900000));
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+
+    // Clean up expired codes, then insert new one
+    await env.DB.prepare(`DELETE FROM claim_codes WHERE expires_at < ?`).bind(new Date().toISOString()).run();
+    await env.DB.prepare(
+      `INSERT OR REPLACE INTO claim_codes (code, user_hash, expires_at) VALUES (?, ?, ?)`
+    ).bind(code, hash, expiresAt).run();
+
+    return json({ ok: true, user_hash: hash, code, expires_in: 300 });
+  }
+
+  // POST /api/claim/verify — website verifies a claim code
+  // Returns the user_hash if the code is valid and not expired.
+  if (url.pathname === "/api/claim/verify" && request.method === "POST") {
+    try {
+      const body = await request.json() as { code?: string };
+      const code = body.code?.trim();
+      if (!code || !/^\d{6}$/.test(code)) {
+        return json({ error: "Invalid code format" }, 400);
+      }
+
+      const row = await env.DB.prepare(
+        `SELECT user_hash, expires_at FROM claim_codes WHERE code = ?`
+      ).bind(code).first<{ user_hash: string; expires_at: string }>();
+
+      if (!row) {
+        return json({ error: "Invalid code" }, 404);
+      }
+
+      if (new Date(row.expires_at) < new Date()) {
+        await env.DB.prepare(`DELETE FROM claim_codes WHERE code = ?`).bind(code).run();
+        return json({ error: "Code expired" }, 410);
+      }
+
+      // Code is valid — delete it (one-time use) and return the hash
+      await env.DB.prepare(`DELETE FROM claim_codes WHERE code = ?`).bind(code).run();
+
+      return json({ ok: true, user_hash: row.user_hash });
+    } catch {
+      return json({ error: "Invalid request" }, 400);
+    }
+  }
+
   return json({ error: "Not found" }, 404);
 }
 
@@ -478,4 +565,13 @@ function json(data: unknown, status = 200): Response {
     status,
     headers: { "Content-Type": "application/json", ...corsHeaders() },
   });
+}
+
+// SHA-256, first 16 bytes as 32-char hex (matches plugin's hash)
+async function sha256Short(input: string): Promise<string> {
+  const data = new TextEncoder().encode(input);
+  const hash = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(hash).slice(0, 16))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
 }
