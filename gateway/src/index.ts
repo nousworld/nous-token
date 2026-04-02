@@ -26,7 +26,7 @@
 // AUDIT: Search this codebase for "authorization", "x-api-key", "content",
 // "choices", "message", "prompt" — none appear in any data-reading context.
 
-import { PROVIDERS, type UsageData } from "./providers";
+import { PROVIDER_SHORTCUTS, extractUsage, type UsageData } from "./providers";
 import { teeStreamForUsage } from "./stream";
 import { initDB, recordUsage, getMerkleState, type Env } from "./db";
 
@@ -69,28 +69,51 @@ export default {
 
     // ── Proxy Logic ──
 
-    const parts = url.pathname.split("/");
-    const providerKey = parts[1]?.toLowerCase();
-    const provider = providerKey ? PROVIDERS[providerKey] : undefined;
-
-    if (!provider) {
-      return json(
-        { error: "Unknown provider. Use: /" + Object.keys(PROVIDERS).join(", /") },
-        400
-      );
-    }
-
     const userHash = request.headers.get("x-nous-user");
     if (!userHash || !/^[a-f0-9]{32}$/.test(userHash)) {
       return json({ error: "Missing or invalid X-Nous-User header. Install the nous-token plugin." }, 401);
     }
 
-    const upstreamPath = "/" + parts.slice(2).join("/") + url.search;
-    const upstreamUrl = provider.upstream + upstreamPath;
+    // Resolve upstream: shortcut prefix (e.g. /openai/v1/...) or X-Nous-Upstream header
+    const parts = url.pathname.split("/");
+    const firstSegment = parts[1]?.toLowerCase() || "";
+    const shortcutUpstream = PROVIDER_SHORTCUTS[firstSegment];
+    const customUpstream = request.headers.get("x-nous-upstream");
+
+    let upstreamBase: string;
+    let providerName: string;
+    let apiPath: string;
+
+    if (shortcutUpstream) {
+      // Known shortcut: /openai/v1/chat/completions → api.openai.com/v1/chat/completions
+      upstreamBase = shortcutUpstream;
+      providerName = firstSegment;
+      apiPath = "/" + parts.slice(2).join("/");
+    } else if (customUpstream) {
+      // Custom upstream via header: any URL
+      try {
+        const parsed = new URL(customUpstream);
+        upstreamBase = parsed.origin;
+        providerName = parsed.hostname.split(".")[1] || parsed.hostname.split(".")[0] || "custom";
+        // Full path from the request (no prefix stripping)
+        apiPath = url.pathname;
+      } catch {
+        return json({ error: "Invalid X-Nous-Upstream URL" }, 400);
+      }
+    } else {
+      const shortcuts = Object.keys(PROVIDER_SHORTCUTS).join(", /");
+      return json(
+        { error: `Unknown route. Use: /${shortcuts}, or set X-Nous-Upstream header for custom providers.` },
+        400
+      );
+    }
+
+    const upstreamUrl = upstreamBase + apiPath + url.search;
 
     const upstreamHeaders = new Headers(request.headers);
     upstreamHeaders.delete("host");
     upstreamHeaders.delete("x-nous-user");
+    upstreamHeaders.delete("x-nous-upstream");
 
     let upstreamResponse: Response;
     try {
@@ -115,17 +138,17 @@ export default {
 
     const contentType = upstreamResponse.headers.get("content-type") || "";
     const isStreaming = contentType.includes("text/event-stream");
-    const endpoint = parts.slice(2).join("/");
+    const endpoint = apiPath.replace(/^\//, "");
 
     const signingKey = await getSigningKey(env);
 
     if (isStreaming && upstreamResponse.body) {
-      const [clientStream, usagePromise] = teeStreamForUsage(upstreamResponse, provider);
+      const [clientStream, usagePromise] = teeStreamForUsage(upstreamResponse);
 
       ctx.waitUntil(
         usagePromise.then((usage) => {
           if (usage) {
-            return recordUsage(env.DB, userHash, provider.name, usage, endpoint, signingKey ?? undefined);
+            return recordUsage(env.DB, userHash, providerName, usage, endpoint, signingKey ?? undefined);
           }
         })
       );
@@ -142,9 +165,9 @@ export default {
           try {
             const text = new TextDecoder().decode(bodyBytes);
             const parsed = JSON.parse(text) as Record<string, unknown>;
-            const usage = provider.extractUsage(parsed);
+            const usage = extractUsage(parsed);
             if (usage && usage.totalTokens > 0) {
-              await recordUsage(env.DB, userHash, provider.name, usage, endpoint, signingKey ?? undefined);
+              await recordUsage(env.DB, userHash, providerName, usage, endpoint, signingKey ?? undefined);
             }
           } catch {
             // Not JSON or no usage — fine

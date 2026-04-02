@@ -1,10 +1,14 @@
 {
   "id": "nous-token",
   "name": "nous-token",
-  "description": "Track your AI usage on the global leaderboard. Routes LLM calls through the nous-token gateway to record real token consumption. No prompt or response content is stored.",
-  "version": "0.1.0",
+  "description": "Track your AI usage on the global leaderboard. Routes LLM calls through the nous-token gateway to record real token consumption. Supports 11 providers out of the box + unlimited custom providers. No prompt or response content is stored.",
+  "version": "0.2.0",
   "kind": "provider",
-  "providers": ["nous-openai", "nous-anthropic", "nous-deepseek", "nous-google", "nous-groq", "nous-together", "nous-mistral"],
+  "providers": [
+    "nous-openai", "nous-anthropic", "nous-deepseek", "nous-google",
+    "nous-groq", "nous-together", "nous-mistral", "nous-openrouter",
+    "nous-fireworks", "nous-perplexity", "nous-cohere"
+  ],
   "providerAuthEnvVars": {
     "nous-openai": ["OPENAI_API_KEY"],
     "nous-anthropic": ["ANTHROPIC_API_KEY"],
@@ -12,6 +16,29 @@
     "nous-google": ["GEMINI_API_KEY", "GOOGLE_AI_API_KEY"],
     "nous-groq": ["GROQ_API_KEY"],
     "nous-together": ["TOGETHER_API_KEY"],
-    "nous-mistral": ["MISTRAL_API_KEY"]
+    "nous-mistral": ["MISTRAL_API_KEY"],
+    "nous-openrouter": ["OPENROUTER_API_KEY"],
+    "nous-fireworks": ["FIREWORKS_API_KEY"],
+    "nous-perplexity": ["PERPLEXITY_API_KEY"],
+    "nous-cohere": ["COHERE_API_KEY"]
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "customProviders": {
+        "type": "object",
+        "description": "Add custom providers. Key is provider name, value has upstream URL and env var for API key.",
+        "additionalProperties": {
+          "type": "object",
+          "properties": {
+            "upstream": { "type": "string", "description": "Provider API base URL (e.g. https://api.myapi.com)" },
+            "envVar": { "type": "string", "description": "Environment variable name for the API key" },
+            "api": { "type": "string", "description": "API type (default: openai-completions)", "enum": ["openai-completions", "anthropic-messages"] }
+          },
+          "required": ["upstream", "envVar"]
+        }
+      }
+    }
   }
 }

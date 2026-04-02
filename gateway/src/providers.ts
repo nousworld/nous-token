@@ -1,13 +1,13 @@
-// Provider configuration — maps route prefix to upstream API base URL
+// Usage extraction — auto-detects format from provider response
 //
-// NOTE: No auth header names here. The gateway does NOT read API keys.
-// User identity comes from X-Nous-User header (hash computed by plugin locally).
-
-export interface ProviderConfig {
-  name: string;
-  upstream: string;
-  extractUsage: (body: Record<string, unknown>) => UsageData | null;
-}
+// Three formats exist in the wild:
+//   1. OpenAI-compatible: body.usage.prompt_tokens / completion_tokens
+//   2. Anthropic: body.usage.input_tokens / output_tokens
+//   3. Gemini: body.usageMetadata.promptTokenCount / candidatesTokenCount
+//
+// Most providers (OpenAI, DeepSeek, Groq, Together, Mistral, Fireworks,
+// Perplexity, OpenRouter, etc.) use format 1. Auto-detection means we
+// don't need to know about providers in advance.
 
 export interface UsageData {
   model: string;
@@ -18,19 +18,35 @@ export interface UsageData {
   totalTokens: number;
 }
 
-// OpenAI-compatible usage extraction (works for OpenAI, DeepSeek, Groq, Together, etc.)
-function extractOpenAIUsage(body: Record<string, unknown>): UsageData | null {
+/**
+ * Auto-detect usage format and extract token counts.
+ * Tries all three known formats. Returns null if no usage found.
+ */
+export function extractUsage(body: Record<string, unknown>): UsageData | null {
+  // Try OpenAI-compatible format (most common)
+  const openai = tryOpenAI(body);
+  if (openai) return openai;
+
+  // Try Anthropic format
+  const anthropic = tryAnthropic(body);
+  if (anthropic) return anthropic;
+
+  // Try Gemini format
+  const gemini = tryGemini(body);
+  if (gemini) return gemini;
+
+  return null;
+}
+
+function tryOpenAI(body: Record<string, unknown>): UsageData | null {
   const usage = body.usage as Record<string, unknown> | undefined;
-  if (!usage) return null;
+  if (!usage || !("prompt_tokens" in usage || "completion_tokens" in usage)) return null;
   const model = (body.model as string) || "unknown";
   const prompt = (usage.prompt_tokens as number) || 0;
   const completion = (usage.completion_tokens as number) || 0;
   const total = (usage.total_tokens as number) || prompt + completion;
-
-  // OpenAI extended fields
   const details = usage.prompt_tokens_details as Record<string, unknown> | undefined;
   const cacheRead = (details?.cached_tokens as number) || 0;
-
   return {
     model,
     inputTokens: prompt,
@@ -41,10 +57,11 @@ function extractOpenAIUsage(body: Record<string, unknown>): UsageData | null {
   };
 }
 
-// Anthropic usage extraction
-function extractAnthropicUsage(body: Record<string, unknown>): UsageData | null {
+function tryAnthropic(body: Record<string, unknown>): UsageData | null {
   const usage = body.usage as Record<string, unknown> | undefined;
-  if (!usage) return null;
+  if (!usage || !("input_tokens" in usage)) return null;
+  // Disambiguate from OpenAI: Anthropic has input_tokens, OpenAI has prompt_tokens
+  if ("prompt_tokens" in usage) return null; // it's OpenAI format
   const model = (body.model as string) || "unknown";
   return {
     model,
@@ -56,69 +73,36 @@ function extractAnthropicUsage(body: Record<string, unknown>): UsageData | null 
   };
 }
 
-// Google Gemini usage extraction
-// NOTE: Google changes field names across API versions. If extraction fails,
-// we still return a record with model name and zero tokens rather than null,
-// so the call is counted even if token details are lost.
-function extractGeminiUsage(body: Record<string, unknown>): UsageData | null {
-  // Try usageMetadata (current) and usage (potential future name)
+function tryGemini(body: Record<string, unknown>): UsageData | null {
   const meta = (body.usageMetadata ?? body.usage) as Record<string, unknown> | undefined;
+  if (!meta || !("promptTokenCount" in meta || "candidatesTokenCount" in meta)) return null;
   const model = (body.modelVersion as string) || (body.model as string) || "unknown";
-  if (!meta) {
-    // No usage data at all — but if body has a model, record a zero-token entry
-    if (body.candidates || body.modelVersion) {
-      return { model, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 0 };
-    }
-    return null;
-  }
-  // Try multiple known field names for each metric
   const input = (meta.promptTokenCount as number) || (meta.input_tokens as number) || 0;
   const output = (meta.candidatesTokenCount as number) || (meta.output_tokens as number) || 0;
-  const cached = (meta.cachedContentTokenCount as number) || (meta.cache_read_tokens as number) || 0;
+  const cached = (meta.cachedContentTokenCount as number) || 0;
   return {
     model,
     inputTokens: input,
     outputTokens: output,
     cacheReadTokens: cached,
     cacheWriteTokens: 0,
-    totalTokens: (meta.totalTokenCount as number) || (meta.total_tokens as number) || input + output,
+    totalTokens: (meta.totalTokenCount as number) || input + output,
   };
 }
 
-export const PROVIDERS: Record<string, ProviderConfig> = {
-  openai: {
-    name: "openai",
-    upstream: "https://api.openai.com",
-    extractUsage: extractOpenAIUsage,
-  },
-  anthropic: {
-    name: "anthropic",
-    upstream: "https://api.anthropic.com",
-    extractUsage: extractAnthropicUsage,
-  },
-  deepseek: {
-    name: "deepseek",
-    upstream: "https://api.deepseek.com",
-    extractUsage: extractOpenAIUsage,
-  },
-  gemini: {
-    name: "gemini",
-    upstream: "https://generativelanguage.googleapis.com",
-    extractUsage: extractGeminiUsage,
-  },
-  groq: {
-    name: "groq",
-    upstream: "https://api.groq.com",
-    extractUsage: extractOpenAIUsage,
-  },
-  together: {
-    name: "together",
-    upstream: "https://api.together.xyz",
-    extractUsage: extractOpenAIUsage,
-  },
-  mistral: {
-    name: "mistral",
-    upstream: "https://api.mistral.ai",
-    extractUsage: extractOpenAIUsage,
-  },
+// ── Common provider shortcuts ──
+// Users can also pass any upstream URL via X-Nous-Upstream header.
+
+export const PROVIDER_SHORTCUTS: Record<string, string> = {
+  openai:      "https://api.openai.com",
+  anthropic:   "https://api.anthropic.com",
+  deepseek:    "https://api.deepseek.com",
+  gemini:      "https://generativelanguage.googleapis.com",
+  groq:        "https://api.groq.com",
+  together:    "https://api.together.xyz",
+  mistral:     "https://api.mistral.ai",
+  openrouter:  "https://openrouter.ai/api",
+  fireworks:   "https://api.fireworks.ai",
+  perplexity:  "https://api.perplexity.ai",
+  cohere:      "https://api.cohere.com",
 };

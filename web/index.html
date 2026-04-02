@@ -485,6 +485,12 @@ async function storeReceipts(btn, userHash) {
       btn.textContent = 'Store Receipts on BASE'; btn.disabled = false;
       return;
     }
+    if (data.has_more) {
+      if (!confirm('You have more than ' + signed.length + ' receipts. Only the first ' + signed.length + ' will be stored. Continue?')) {
+        btn.textContent = 'Store Receipts on BASE'; btn.disabled = false;
+        return;
+      }
+    }
     await sendToBase(btn, signed.length + ' receipt(s)', {
       p: 'nous', v: 1, type: 'receipts',
       user: userHash,

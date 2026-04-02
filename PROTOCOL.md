@@ -9,15 +9,24 @@ The gateway guarantees data authenticity. It does not dictate storage format.
 ## How It Works
 
 ```
-User → Plugin/CLI → Gateway → LLM Provider
-                      ↓            ↓
-               hash(API key)    extract .usage
-               X-Nous-User      from response
-                      ↓
-                sign receipt (ECDSA) + store in D1 + update Merkle tree
-                      ↓
-              User fetches receipts → decides what to store on-chain
+User → Plugin/CLI/SDK → Gateway → LLM Provider (any)
+                           ↓            ↓
+                    hash(API key)    extract .usage
+                    X-Nous-User      auto-detect format
+                           ↓
+                     sign receipt (ECDSA) + store in D1 + update Merkle tree
+                           ↓
+                   User fetches receipts → decides what to store on-chain
 ```
+
+### Provider Routing
+
+Two ways to route through the gateway:
+
+1. **Shortcut prefix**: `/{provider}/v1/...` for known providers (openai, anthropic, deepseek, gemini, groq, together, mistral, openrouter, fireworks, perplexity, cohere)
+2. **Custom upstream**: Set `X-Nous-Upstream: https://api.example.com` header to proxy any OpenAI-compatible API
+
+Usage extraction auto-detects response format (OpenAI, Anthropic, or Gemini style). No provider registration needed.
 
 ## The Receipt
 
@@ -68,7 +77,7 @@ The gateway signs the leaf hash, not the JSON. This means:
 
 Not by promise — by code. Audit the source:
 
-- **API Key**: Plugin computes SHA-256 hash locally, sends only the hash via `X-Nous-User` header. Gateway code never reads `authorization` or `x-api-key`.
+- **API Key**: Plugin computes SHA-256 hash locally, sends only the hash via `X-Nous-User` header. Gateway code never reads `authorization` or `x-api-key`. The `X-Nous-Upstream` header (if used) is stripped before forwarding.
 - **Prompts**: `request.body` is piped directly to the provider. No `.text()`, `.json()`, or `.getReader()` is called on it.
 - **Responses (streaming)**: Tee'd. One branch to user unchanged, other buffers last 4KB to extract `.usage` only.
 - **Responses (non-streaming)**: Full body in Worker memory (V8 isolate, GC'd after request) to extract `.usage`. Never reads `.choices`, `.content`.
@@ -139,4 +148,4 @@ Search the source to verify privacy claims:
 - `authorization`, `x-api-key` → never read, only forwarded
 - `request.body` → only as argument to `fetch()` (piped, not consumed)
 - `.content`, `.choices`, `.message` → absent from data-reading code
-- `headers.get()` → only for `x-nous-user` and `content-type`
+- `headers.get()` → only for `x-nous-user`, `x-nous-upstream`, and `content-type`

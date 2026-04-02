@@ -5,8 +5,11 @@
 //   message_start  → model + input usage (input_tokens, cache_read/write)
 //   message_delta  → output usage (output_tokens)
 // We capture both and merge them at the end.
+//
+// OpenAI-compatible providers put usage in the final chunk.
+// Auto-detection handles both.
 
-import type { ProviderConfig, UsageData } from "./providers";
+import { extractUsage, type UsageData } from "./providers";
 
 /** Partial usage captured from early stream events (Anthropic message_start) */
 interface EarlyUsage {
@@ -23,8 +26,7 @@ interface EarlyUsage {
  * Returns [readableStream for client, promise that resolves to UsageData or null]
  */
 export function teeStreamForUsage(
-  response: Response,
-  provider: ProviderConfig
+  response: Response
 ): [ReadableStream<Uint8Array>, Promise<UsageData | null>] {
   const reader = response.body!.getReader();
   const decoder = new TextDecoder();
@@ -42,8 +44,7 @@ export function teeStreamForUsage(
       const { done, value } = await reader.read();
       if (done) {
         controller.close();
-        // Try to extract usage from buffered tail, merging with early data
-        const usage = extractUsageFromSSE(tail, provider, early);
+        const usage = extractUsageFromSSE(tail, early);
         resolveUsage(usage);
         return;
       }
@@ -74,8 +75,6 @@ export function teeStreamForUsage(
 
 /**
  * Extract model and input usage from Anthropic's message_start event.
- * This event arrives early in the stream and contains:
- *   { "type": "message_start", "message": { "model": "...", "usage": { "input_tokens": N, ... } } }
  */
 function extractEarlyUsage(buffer: string): EarlyUsage | null {
   const lines = buffer.split("\n");
@@ -105,12 +104,10 @@ function extractEarlyUsage(buffer: string): EarlyUsage | null {
 
 /**
  * Parse SSE tail to find the last data chunk containing usage info.
- * OpenAI/DeepSeek/Groq: final chunk has usage in the JSON
- * Anthropic: message_delta event has output_tokens, merged with early input data
+ * Auto-detects format: tries Anthropic message_delta first, then generic extractUsage.
  */
 function extractUsageFromSSE(
   tail: string,
-  provider: ProviderConfig,
   early: EarlyUsage | null
 ): UsageData | null {
   const lines = tail.split("\n");
@@ -126,7 +123,6 @@ function extractUsageFromSSE(
         const u = json.usage as Record<string, unknown> | undefined;
         if (u) {
           const outputTokens = (u.output_tokens as number) || 0;
-          // Merge with early data (model + input tokens from message_start)
           const inputTokens = early?.inputTokens || 0;
           const cacheRead = early?.cacheReadTokens || 0;
           const cacheWrite = early?.cacheWriteTokens || 0;
@@ -141,8 +137,8 @@ function extractUsageFromSSE(
         }
       }
 
-      // OpenAI-compatible: usage in the final chunk
-      const usage = provider.extractUsage(json);
+      // OpenAI-compatible and others: auto-detect from the chunk
+      const usage = extractUsage(json);
       if (usage && usage.totalTokens > 0) return usage;
     } catch {
       // not valid JSON, skip
