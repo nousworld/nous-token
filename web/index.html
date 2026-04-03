@@ -75,6 +75,7 @@ nav { border-bottom:1px solid var(--silk); background:var(--parchment); position
 .rank-2 { color:var(--sage); }
 .rank-3 { color:var(--teal); }
 .user-hash { font-family:'SF Mono','Fira Code',monospace; font-size:12px; color:var(--sage); }
+.wallet-addr { color:var(--teal); }
 .tokens { font-weight:600; color:var(--charcoal); }
 .cost { color:var(--amber); font-weight:500; }
 .calls { color:var(--sage); }
@@ -180,7 +181,7 @@ footer a:hover { text-decoration:underline; }
   <div class="tab active" onclick="showTab('leaderboard')">Leaderboard</div>
   <div class="tab" onclick="showTab('models')">Models</div>
   <div class="tab" onclick="showTab('lookup')">Look Up</div>
-  <div class="tab" onclick="showTab('claim')">Claim</div>
+  <div class="tab" onclick="showTab('setup')">Setup</div>
 </div>
 
 <div class="content">
@@ -193,10 +194,8 @@ footer a:hover { text-decoration:underline; }
       </div>
       <div style="height:16px;width:1px;background:var(--silk)"></div>
       <div class="period-row" style="margin-bottom:0">
-        <button class="period-btn" onclick="setPeriod(7,this)">7d</button>
         <button class="period-btn active" onclick="setPeriod(30,this)">30d</button>
-        <button class="period-btn" onclick="setPeriod(90,this)">90d</button>
-        <button class="period-btn" onclick="setPeriod(365,this)">1y</button>
+        <button class="period-btn" onclick="setPeriod(0,this)">All Time</button>
       </div>
     </div>
     <div id="leaderboardContent"><div class="loading">Loading...</div></div>
@@ -205,9 +204,8 @@ footer a:hover { text-decoration:underline; }
   <!-- Models -->
   <div class="section" id="sec-models">
     <div class="period-row">
-      <button class="period-btn" onclick="setModelPeriod(7,this)">7d</button>
       <button class="period-btn active" onclick="setModelPeriod(30,this)">30d</button>
-      <button class="period-btn" onclick="setModelPeriod(90,this)">90d</button>
+      <button class="period-btn" onclick="setModelPeriod(0,this)">All Time</button>
     </div>
     <div id="modelsContent"><div class="loading">Loading...</div></div>
   </div>
@@ -215,31 +213,36 @@ footer a:hover { text-decoration:underline; }
   <!-- Lookup -->
   <div class="section" id="sec-lookup">
     <div class="search-row">
-      <input class="search-input" id="lookupInput" placeholder="Enter your user hash..." onkeydown="if(event.key==='Enter')lookupUser()">
+      <input class="search-input" id="lookupInput" placeholder="Enter wallet address (0x...) or user hash..." onkeydown="if(event.key==='Enter')lookupUser()">
     </div>
     <div id="lookupContent">
       <div style="text-align:center;padding:40px;color:var(--sage)">
-        Enter your user hash to see your AI usage breakdown.<br>
-        <span style="font-size:12px;margin-top:8px;display:block;color:var(--clay)">
-          Run <code style="background:var(--white);padding:2px 8px;border-radius:6px;border:1px solid var(--silk);font-size:12px">npx nous-token claim</code> to find your hash.
-        </span>
+        Enter your wallet address or user hash to see your AI usage breakdown.
       </div>
     </div>
   </div>
 
-  <!-- Claim -->
-  <div class="section" id="sec-claim">
+  <!-- Setup -->
+  <div class="section" id="sec-setup">
     <div class="claim-box">
-      <div class="claim-title">Claim your identity</div>
-      <div class="claim-desc">
-        Run <code style="background:var(--white);padding:2px 8px;border-radius:6px;border:1px solid var(--silk);font-size:12px">npx nous-token claim</code> in your terminal to get a 6-digit code.<br>
-        This proves you own the API key behind a hash.
+      <div class="claim-title">Get started</div>
+      <div class="claim-desc" style="line-height:2.2;text-align:left;max-width:480px;margin:0 auto">
+        <strong>1. Set up tracking</strong><br>
+        <code style="background:var(--white);padding:4px 12px;border-radius:6px;border:1px solid var(--silk);font-size:13px">npx nous-token setup</code><br>
+        Scans your AI tools and routes them through the gateway.<br><br>
+        <strong>2. Link your wallet</strong><br>
+        <code style="background:var(--white);padding:4px 12px;border-radius:6px;border:1px solid var(--silk);font-size:13px">npx nous-token link 0xYourWalletAddress</code><br>
+        Your wallet is your permanent identity. Change API keys, switch machines — your usage follows your wallet.<br><br>
+        <strong>3. Use AI as usual</strong><br>
+        Every token is recorded automatically. Look up your wallet here to see your stats.
       </div>
-      <div style="margin-bottom:16px">
-        <input class="claim-input" id="claimInput" placeholder="------" maxlength="6" onkeydown="if(event.key==='Enter')verifyClaim()">
+      <div style="margin-top:28px;padding-top:24px;border-top:1px solid var(--silk)">
+        <div style="font-size:13px;color:var(--sage);margin-bottom:12px">Look up your wallet:</div>
+        <div style="display:flex;gap:8px;justify-content:center;max-width:400px;margin:0 auto">
+          <input class="search-input" id="setupWalletInput" placeholder="0x..." style="font-size:13px" onkeydown="if(event.key==='Enter')lookupFromBoard(this.value.trim())">
+          <button class="proof-btn" style="white-space:nowrap" onclick="lookupFromBoard(document.getElementById('setupWalletInput').value.trim())">Look Up</button>
+        </div>
       </div>
-      <button class="proof-btn" onclick="verifyClaim()">Verify</button>
-      <div id="claimResult" style="margin-top:24px"></div>
     </div>
   </div>
 </div>
@@ -377,11 +380,11 @@ async function loadLeaderboard(days){
       var maxCost=d.data[0].total_cost||1;
       var html='<table class="table"><thead><tr><th>#</th><th>User</th><th>Cost</th><th>Tokens</th><th>Calls</th><th></th></tr></thead><tbody>';
       for(var i=0;i<d.data.length;i++){
-        var row=d.data[i];var rc=i<3?' rank-'+(i+1):'';
+        var row=d.data[i];var rc=i<3?' rank-'+(i+1):'';var id=row.identity||row.user_hash;
         var pct=Math.round(((row.total_cost||0)/maxCost)*100);
-        html+='<tr onclick="lookupFromBoard(\''+row.user_hash+'\')" style="cursor:pointer;animation-delay:'+(i*0.04)+'s">'
+        html+='<tr onclick="lookupFromBoard(\''+escapeHtml(id)+'\')" style="cursor:pointer;animation-delay:'+(i*0.04)+'s">'
           +'<td class="rank'+rc+'">'+(i+1)+'</td>'
-          +'<td class="user-hash">'+escapeHtml(row.user_hash)+'</td>'
+          +'<td class="'+identityClass(id)+'" title="'+escapeHtml(id)+'">'+escapeHtml(formatIdentity(id))+'</td>'
           +'<td class="cost" style="font-weight:600">'+formatCost(row.total_cost)+'</td>'
           +'<td class="tokens">'+formatNumber(row.total_tokens)+'</td>'
           +'<td class="calls">'+formatNumber(row.call_count)+'</td>'
@@ -395,11 +398,11 @@ async function loadLeaderboard(days){
       var max=d.data[0].total_tokens||1;
       var html='<table class="table"><thead><tr><th>#</th><th>User</th><th>Tokens</th><th>Calls</th><th></th></tr></thead><tbody>';
       for(var i=0;i<d.data.length;i++){
-        var row=d.data[i];var rc=i<3?' rank-'+(i+1):'';
+        var row=d.data[i];var rc=i<3?' rank-'+(i+1):'';var id=row.identity||row.user_hash;
         var pct=Math.round((row.total_tokens/max)*100);
-        html+='<tr onclick="lookupFromBoard(\''+row.user_hash+'\')" style="cursor:pointer;animation-delay:'+(i*0.04)+'s">'
+        html+='<tr onclick="lookupFromBoard(\''+escapeHtml(id)+'\')" style="cursor:pointer;animation-delay:'+(i*0.04)+'s">'
           +'<td class="rank'+rc+'">'+(i+1)+'</td>'
-          +'<td class="user-hash">'+escapeHtml(row.user_hash)+'</td>'
+          +'<td class="'+identityClass(id)+'" title="'+escapeHtml(id)+'">'+escapeHtml(formatIdentity(id))+'</td>'
           +'<td class="tokens">'+formatNumber(row.total_tokens)+'</td>'
           +'<td class="calls">'+formatNumber(row.call_count)+'</td>'
           +'<td class="bar-cell"><div class="bar-bg"><div class="bar-fill" style="width:'+pct+'%"></div></div></td>'
@@ -420,13 +423,12 @@ async function loadModels(days){
     var r=await fetch(API+'/api/models?days='+days);var d=await r.json();
     if(!d.ok||!d.data||d.data.length===0){el.innerHTML='<div class="loading">No data yet.</div>';return;}
     var max=d.data[0].total_tokens||1;
-    var html='<table class="table"><thead><tr><th>Model</th><th>Provider</th><th>Tokens</th><th>Est. Cost</th><th>Users</th><th>Calls</th><th></th></tr></thead><tbody>';
+    var html='<table class="table"><thead><tr><th>Model</th><th>Tokens</th><th>Est. Cost</th><th>Users</th><th>Calls</th><th></th></tr></thead><tbody>';
     for(var i=0;i<d.data.length;i++){
       var row=d.data[i];var pct=Math.round((row.total_tokens/max)*100);
       var mcost=row.total_cost>0?row.total_cost:estimateCost(row.model,row.input_tokens||0,row.output_tokens||0);
-      html+='<tr style="animation-delay:'+(i*0.04)+'s">'
+      html+='<tr onclick="loadModelLeaderboard(\''+escapeHtml(row.model).replace(/'/g,"\\'")+'\','+days+')" style="cursor:pointer;animation-delay:'+(i*0.04)+'s">'
         +'<td class="model-name">'+escapeHtml(row.model)+'</td>'
-        +'<td><span class="provider-badge">'+escapeHtml(row.provider)+'</span></td>'
         +'<td class="tokens">'+formatNumber(row.total_tokens)+'</td>'
         +'<td class="cost">'+formatCost(mcost)+(row.total_cost>0?'':'*')+'</td>'
         +'<td>'+(row.unique_users||0)+'</td>'
@@ -440,47 +442,87 @@ async function loadModels(days){
   }catch(e){el.innerHTML='<div class="loading">Failed to load.</div>';}
 }
 
+// ── Model Leaderboard ──
+async function loadModelLeaderboard(model,days){
+  var el=document.getElementById('modelsContent');
+  el.innerHTML='<div class="loading">Loading...</div>';
+  try{
+    var r=await fetch(API+'/api/leaderboard/model?model='+encodeURIComponent(model)+'&days='+days+'&limit=100');
+    var d=await r.json();
+    var html='<div style="margin-bottom:20px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">'
+      +'<button class="period-btn" onclick="loadModels(currentModelPeriod)" style="font-size:13px">\u2190 All Models</button>'
+      +'<span class="model-name" style="font-size:16px">'+escapeHtml(model)+'</span>'
+      +'</div>';
+    if(!d.ok||!d.data||d.data.length===0){
+      html+='<div class="loading">No users for this model yet.</div>';
+      el.innerHTML=html;return;
+    }
+    var max=d.data[0].total_tokens||1;
+    html+='<table class="table"><thead><tr><th>#</th><th>User</th><th>Tokens</th><th>Cost</th><th>Calls</th><th></th></tr></thead><tbody>';
+    for(var i=0;i<d.data.length;i++){
+      var row=d.data[i];var rc=i<3?' rank-'+(i+1):'';var id=row.identity||row.user_hash;
+      var pct=Math.round((row.total_tokens/max)*100);
+      var c=row.total_cost>0?row.total_cost:estimateCost(model,row.input_tokens||0,row.output_tokens||0);
+      html+='<tr onclick="lookupFromBoard(\''+escapeHtml(id)+'\')" style="cursor:pointer;animation-delay:'+(i*0.04)+'s">'
+        +'<td class="rank'+rc+'">'+(i+1)+'</td>'
+        +'<td class="'+identityClass(id)+'" title="'+escapeHtml(id)+'">'+escapeHtml(formatIdentity(id))+'</td>'
+        +'<td class="tokens">'+formatNumber(row.total_tokens)+'</td>'
+        +'<td class="cost">'+formatCost(c)+(row.total_cost>0?'':'*')+'</td>'
+        +'<td class="calls">'+formatNumber(row.call_count)+'</td>'
+        +'<td class="bar-cell"><div class="bar-bg"><div class="bar-fill" style="width:'+pct+'%"></div></div></td>'
+        +'</tr>';
+    }
+    html+='</tbody></table>';
+    el.innerHTML=html;
+  }catch(e){el.innerHTML='<div class="loading">Failed to load.</div>';}
+}
+
 // ── Lookup ──
-function lookupFromBoard(hash){document.getElementById('lookupInput').value=hash;showTab('lookup');lookupUser();}
+function lookupFromBoard(id){document.getElementById('lookupInput').value=id;showTab('lookup');lookupUser();}
 async function lookupUser(){
-  var hash=document.getElementById('lookupInput').value.trim();if(!hash)return;
+  var input=document.getElementById('lookupInput').value.trim().toLowerCase();if(!input)return;
   var el=document.getElementById('lookupContent');el.innerHTML='<div class="loading">Loading...</div>';
   try{
-    var r=await fetch(API+'/api/user/'+hash);var d=await r.json();
-    if(!d.ok||!d.data||d.data.length===0){el.innerHTML='<div class="loading">No data found for this hash.</div>';return;}
+    var endpoint=isWallet(input)?'/api/wallet/'+input:'/api/user/'+input;
+    var r=await fetch(API+endpoint);var d=await r.json();
+    var hash=d.wallet||d.user_hash||input;
+    if(!d.ok||!d.data||d.data.length===0){el.innerHTML='<div class="loading">No data found.</div>';return;}
     var tt=0,tc=0,tco=0;
     for(var i=0;i<d.data.length;i++){tt+=d.data[i].total_tokens||0;tc+=d.data[i].call_count||0;
       var rc2=d.data[i].total_cost>0?d.data[i].total_cost:estimateCost(d.data[i].model,d.data[i].input_tokens||0,d.data[i].output_tokens||0);
       if(rc2>0)tco+=rc2;
     }
     var html='<div class="user-card">';
-    html+='<div class="user-card-hash">'+escapeHtml(hash)+'</div>';
+    html+='<div class="user-card-hash"'+(isWallet(hash)?' style="color:var(--teal)"':'')+'>'+escapeHtml(hash)+'</div>';
     html+='<div class="user-card-stats">';
     html+='<div class="stat"><div class="stat-value teal" style="font-size:24px">'+formatNumber(tt)+'</div><div class="stat-label">Tokens</div></div>';
     html+='<div class="stat"><div class="stat-value" style="font-size:24px;color:var(--amber)">'+formatCost(tco)+'</div><div class="stat-label">Est. Cost</div></div>';
     html+='<div class="stat"><div class="stat-value" style="font-size:24px">'+formatNumber(tc)+'</div><div class="stat-label">Calls</div></div>';
     html+='<div class="stat"><div class="stat-value" style="font-size:24px">'+d.data.length+'</div><div class="stat-label">Models</div></div>';
     html+='</div></div>';
-    html+='<table class="table"><thead><tr><th>Model</th><th>Provider</th><th>Input</th><th>Output</th><th>Est. Cost</th><th>Calls</th></tr></thead><tbody>';
+    var hasProvider=d.data[0]&&d.data[0].provider;
+    html+='<table class="table"><thead><tr><th>Model</th>'+(hasProvider?'<th>Provider</th>':'')+'<th>Input</th><th>Output</th><th>Est. Cost</th><th>Calls</th></tr></thead><tbody>';
     for(var i=0;i<d.data.length;i++){
       var row=d.data[i];var rc3=row.total_cost>0?row.total_cost:estimateCost(row.model,row.input_tokens||0,row.output_tokens||0);
       html+='<tr style="animation-delay:'+(i*0.04)+'s">'
         +'<td class="model-name">'+escapeHtml(row.model)+'</td>'
-        +'<td><span class="provider-badge">'+escapeHtml(row.provider)+'</span></td>'
+        +(hasProvider?'<td><span class="provider-badge">'+escapeHtml(row.provider)+'</span></td>':'')
         +'<td>'+formatNumber(row.input_tokens)+'</td>'
         +'<td>'+formatNumber(row.output_tokens)+'</td>'
         +'<td class="cost">'+formatCost(rc3)+(row.total_cost>0?'':'*')+'</td>'
         +'<td class="calls">'+formatNumber(row.call_count)+'</td></tr>';
     }
     html+='</tbody></table>';
-    html+='<div class="proof-section">';
-    html+='<div style="font-size:15px;font-weight:600;color:var(--charcoal);margin-bottom:14px">Store on-chain</div>';
-    html+='<div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">';
-    html+='<button class="proof-btn" onclick="storeReceipts(this,\''+escapeHtml(hash)+'\')">Store Receipts on BASE</button>';
-    html+='<button class="proof-btn proof-btn-outline" onclick="storeSummary(this,\''+escapeHtml(hash)+'\')">Store Summary on BASE</button>';
-    html+='</div>';
-    html+='<div class="proof-desc">Every API call generates a gateway-signed receipt. Store on BASE (~$0.01 gas). Anyone can verify with the gateway\'s public key.</div>';
-    html+='</div>';
+    if(!isWallet(hash)){
+      html+='<div class="proof-section">';
+      html+='<div style="font-size:15px;font-weight:600;color:var(--charcoal);margin-bottom:14px">Store on-chain</div>';
+      html+='<div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">';
+      html+='<button class="proof-btn" onclick="storeReceipts(this,\''+escapeHtml(hash)+'\')">Store Receipts on BASE</button>';
+      html+='<button class="proof-btn proof-btn-outline" onclick="storeSummary(this,\''+escapeHtml(hash)+'\')">Store Summary on BASE</button>';
+      html+='</div>';
+      html+='<div class="proof-desc">Every API call generates a gateway-signed receipt. Store on BASE (~$0.01 gas). Anyone can verify with the gateway\'s public key.</div>';
+      html+='</div>';
+    }
     el.innerHTML=html;
   }catch(e){el.innerHTML='<div class="loading">Failed to load.</div>';}
 }
@@ -518,23 +560,13 @@ async function storeSummary(btn,h){
   }catch(e){alert('Error: '+e.message);btn.textContent='Store Summary on BASE';btn.disabled=false;}
 }
 
-// ── Claim ──
-async function verifyClaim(){
-  var code=document.getElementById('claimInput').value.trim();
-  if(!code||!/^\d{6}$/.test(code)){document.getElementById('claimResult').innerHTML='<div style="color:var(--amber)">Enter a 6-digit code.</div>';return;}
-  var el=document.getElementById('claimResult');el.innerHTML='<div style="color:var(--sage)">Verifying...</div>';
-  try{
-    var r=await fetch(API+'/api/claim/verify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:code})});var d=await r.json();
-    if(!d.ok||!d.user_hash){el.innerHTML='<div style="color:#c0392b">'+escapeHtml(d.error||'Invalid or expired code')+'</div>';return;}
-    el.innerHTML='<div style="color:var(--teal);font-size:16px;font-weight:600;margin-bottom:8px">Claimed!</div>'
-      +'<div style="font-family:monospace;font-size:13px;color:var(--teal);word-break:break-all">'+escapeHtml(d.user_hash)+'</div>'
-      +'<div style="margin-top:16px"><button class="proof-btn" onclick="lookupFromBoard(\''+escapeHtml(d.user_hash)+'\')">View my usage</button></div>';
-  }catch(e){el.innerHTML='<div style="color:#c0392b">Failed to verify.</div>';}
-}
 
 // ── Helpers ──
 function formatNumber(n){if(n==null)return'0';n=parseInt(n);if(n>=1e12)return(n/1e12).toFixed(1)+'T';if(n>=1e9)return(n/1e9).toFixed(1)+'B';if(n>=1e6)return(n/1e6).toFixed(1)+'M';if(n>=1e3)return(n/1e3).toFixed(1)+'K';return n.toString();}
 function escapeHtml(s){var d=document.createElement('div');d.appendChild(document.createTextNode(s));return d.innerHTML;}
+function isWallet(s){return/^0x[a-f0-9]{40}$/i.test(s);}
+function formatIdentity(id){if(isWallet(id))return id.slice(0,6)+'...'+id.slice(-4);return id;}
+function identityClass(id){return isWallet(id)?'user-hash wallet-addr':'user-hash';}
 
 // ── Init + Auto-refresh ──
 loadStats();

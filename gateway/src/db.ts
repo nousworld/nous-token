@@ -67,8 +67,10 @@ export async function initDB(db: D1Database): Promise<void> {
       expires_at TEXT NOT NULL
     )`),
   ]);
-  // Migration: add cost column for existing databases
+  // Migrations for existing databases
   try { await db.exec(`ALTER TABLE usage_records ADD COLUMN cost REAL NOT NULL DEFAULT 0`); } catch { /* exists */ }
+  try { await db.exec(`ALTER TABLE usage_records ADD COLUMN wallet TEXT NOT NULL DEFAULT ''`); } catch { /* exists */ }
+  try { await db.exec(`CREATE INDEX IF NOT EXISTS idx_usage_wallet ON usage_records(wallet)`); } catch { /* exists */ }
 }
 
 export async function recordUsage(
@@ -77,16 +79,20 @@ export async function recordUsage(
   provider: string,
   usage: UsageData,
   endpoint: string,
-  signingKey?: CryptoKey
+  signingKey?: CryptoKey,
+  wallet?: string
 ): Promise<Receipt | null> {
   const timestamp = new Date().toISOString();
+
+  // Normalize model name: strip "provider/" prefix (e.g. "anthropic/claude-3-5-haiku" → "claude-3-5-haiku")
+  const model = usage.model.includes("/") ? usage.model.split("/").pop()! : usage.model;
 
   // Leaf hash: SHA-256 of record fields (independent, not chained)
   const leafHash = await sha256([
     timestamp,
     userHash,
     provider,
-    usage.model,
+    model,
     usage.inputTokens,
     usage.outputTokens,
     usage.cacheReadTokens,
@@ -110,14 +116,14 @@ export async function recordUsage(
   // Insert record with receipt signature and real cost
   const result = await db
     .prepare(
-      `INSERT INTO usage_records (timestamp, user_hash, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, total_tokens, endpoint, leaf_hash, receipt_sig, cost)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO usage_records (timestamp, user_hash, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, total_tokens, endpoint, leaf_hash, receipt_sig, cost, wallet)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .bind(
       timestamp,
       userHash,
       provider,
-      usage.model,
+      model,
       usage.inputTokens,
       usage.outputTokens,
       usage.cacheReadTokens,
@@ -126,9 +132,17 @@ export async function recordUsage(
       endpoint,
       leafHash,
       receiptSig,
-      usage.cost
+      usage.cost,
+      wallet || ""
     )
     .run();
+
+  // Backfill: if this user_hash has old records without wallet, link them now
+  if (wallet) {
+    await db.prepare(
+      `UPDATE usage_records SET wallet = ? WHERE user_hash = ? AND wallet = ''`
+    ).bind(wallet, userHash).run();
+  }
 
   // Update MMR
   await appendToMMR(db, leafHash);

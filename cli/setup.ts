@@ -15,11 +15,24 @@ import { createHash } from "crypto";
 
 const GATEWAY = "https://gateway.nousai.cc";
 const HOME = homedir();
+const NOUS_CONFIG = join(HOME, ".nous-token");
+
+function loadWallet(): string {
+  try { return readFileSync(NOUS_CONFIG, "utf-8").trim(); } catch { return ""; }
+}
+
+function saveWallet(wallet: string): void {
+  writeFileSync(NOUS_CONFIG, wallet);
+}
+
+function gatewayUrl(path: string, wallet: string): string {
+  return wallet ? `${GATEWAY}${path}?wallet=${wallet}` : `${GATEWAY}${path}`;
+}
 
 interface Tool {
   name: string;
   detect: () => boolean;
-  configure: () => ConfigResult;
+  configure: (wallet: string) => ConfigResult;
 }
 
 interface ConfigResult {
@@ -36,7 +49,7 @@ const tools: Tool[] = [
     detect: () => {
       try { execSync("which openclaw", { stdio: "ignore" }); return true; } catch { return false; }
     },
-    configure: () => {
+    configure: (_wallet: string) => {
       try {
         execSync("openclaw plugins install nous-token", { stdio: "inherit" });
         return { success: true, message: "installed nous-token plugin" };
@@ -54,10 +67,8 @@ const tools: Tool[] = [
       if (existsSync(claudeDir)) return true;
       try { execSync("which claude", { stdio: "ignore" }); return true; } catch { return false; }
     },
-    configure: () => {
-      // Claude Code reads ANTHROPIC_BASE_URL from shell environment (process.env),
-      // not from ~/.claude/.env. Write to .zshrc/.bashrc like other tools.
-      return setShellEnv("ANTHROPIC_BASE_URL", `${GATEWAY}/anthropic`, "Claude Code");
+    configure: (wallet: string) => {
+      return setShellEnv("ANTHROPIC_BASE_URL", gatewayUrl("/anthropic", wallet), "Claude Code");
     },
   },
 
@@ -72,8 +83,7 @@ const tools: Tool[] = [
       ];
       return paths.some(p => existsSync(p));
     },
-    configure: () => {
-      // Cursor uses VS Code-style settings
+    configure: (wallet: string) => {
       const settingsPaths = [
         join(HOME, "Library", "Application Support", "Cursor", "User", "settings.json"),
         join(HOME, ".config", "Cursor", "User", "settings.json"),
@@ -85,7 +95,7 @@ const tools: Tool[] = [
             if (content["openai.baseUrl"]?.includes("nousai")) {
               return { success: true, message: "already configured" };
             }
-            content["openai.baseUrl"] = `${GATEWAY}/openai/v1`;
+            content["openai.baseUrl"] = gatewayUrl("/openai/v1", wallet);
             writeFileSync(sp, JSON.stringify(content, null, 2));
             return { success: true, message: `set baseUrl in Cursor settings` };
           } catch {
@@ -104,8 +114,8 @@ const tools: Tool[] = [
       return existsSync(join(HOME, ".codex")) ||
         (() => { try { execSync("which codex", { stdio: "ignore" }); return true; } catch { return false; } })();
     },
-    configure: () => {
-      return setShellEnv("OPENAI_BASE_URL", `${GATEWAY}/openai/v1`, "Codex");
+    configure: (wallet: string) => {
+      return setShellEnv("OPENAI_BASE_URL", gatewayUrl("/openai/v1", wallet), "Codex");
     },
   },
 
@@ -116,10 +126,8 @@ const tools: Tool[] = [
       return existsSync(join(HOME, ".gemini")) ||
         (() => { try { execSync("which gemini", { stdio: "ignore" }); return true; } catch { return false; } })();
     },
-    configure: () => {
-      // Gemini CLI uses GOOGLE_GEMINI_BASE_URL (not GEMINI_BASE_URL)
-      // Must use API key auth, not OAuth (OAuth bypasses proxy)
-      return setShellEnv("GOOGLE_GEMINI_BASE_URL", `${GATEWAY}/gemini`, "Gemini CLI");
+    configure: (wallet: string) => {
+      return setShellEnv("GOOGLE_GEMINI_BASE_URL", gatewayUrl("/gemini", wallet), "Gemini CLI");
     },
   },
 
@@ -129,8 +137,8 @@ const tools: Tool[] = [
     detect: () => {
       try { execSync("python3 -c 'import openai'", { stdio: "ignore" }); return true; } catch { return false; }
     },
-    configure: () => {
-      return setShellEnv("OPENAI_BASE_URL", `${GATEWAY}/openai/v1`, "Python openai SDK");
+    configure: (wallet: string) => {
+      return setShellEnv("OPENAI_BASE_URL", gatewayUrl("/openai/v1", wallet), "Python openai SDK");
     },
   },
 
@@ -140,8 +148,8 @@ const tools: Tool[] = [
     detect: () => {
       try { execSync("python3 -c 'import anthropic'", { stdio: "ignore" }); return true; } catch { return false; }
     },
-    configure: () => {
-      return setShellEnv("ANTHROPIC_BASE_URL", `${GATEWAY}/anthropic`, "Python anthropic SDK");
+    configure: (wallet: string) => {
+      return setShellEnv("ANTHROPIC_BASE_URL", gatewayUrl("/anthropic", wallet), "Python anthropic SDK");
     },
   },
 ];
@@ -194,89 +202,104 @@ function computeUserHash(): string | null {
   return createHash("sha256").update(key).digest("hex").slice(0, 32);
 }
 
+// ── Prompt helper ──
+
+async function ask(prompt: string): Promise<string> {
+  process.stdout.write(prompt);
+  return new Promise<string>((resolve) => {
+    process.stdin.setEncoding("utf-8");
+    process.stdin.once("data", (chunk) => resolve(chunk.toString().trim()));
+    process.stdin.resume();
+  });
+}
+
 // ── Main ──
 
-const command = process.argv[2] || "setup";
+console.log("");
+console.log("  \x1b[1mnous-token setup\x1b[0m\n");
 
-if (command === "claim") {
-  // ── Claim: prove you own a hash on the leaderboard ──
-  // Sends API key in Authorization header — gateway computes hash from it.
-  // This proves you actually hold the key, not just know the hash.
-  const apiKey = findFirstApiKey();
-  if (!apiKey) {
-    console.log("\n  No API key found in environment. Set OPENAI_API_KEY, ANTHROPIC_API_KEY, or similar.\n");
+// Step 1: Wallet address
+let wallet = loadWallet();
+const walletArg = process.argv.find(a => /^0x[a-fA-F0-9]{40}$/.test(a));
+if (walletArg) {
+  wallet = walletArg.toLowerCase();
+} else if (!wallet) {
+  const input = await ask("  Wallet address (0x...): ");
+  if (/^0x[a-fA-F0-9]{40}$/.test(input)) {
+    wallet = input.toLowerCase();
+  } else if (input) {
+    console.log("  \x1b[33mInvalid address format.\x1b[0m\n");
     process.exit(1);
   }
+}
 
-  const hash = createHash("sha256").update(apiKey.replace(/^Bearer\s+/i, "")).digest("hex").slice(0, 32);
+if (wallet) {
+  saveWallet(wallet);
+  console.log(`  \x1b[36mWallet: ${wallet}\x1b[0m\n`);
+} else {
+  console.log("  \x1b[90mNo wallet. Run again with: npx nous-token setup 0x...\x1b[0m\n");
+  process.exit(0);
+}
 
-  console.log("");
-  console.log(`  \x1b[1mnous-token claim\x1b[0m`);
-  console.log(`  Your user hash: \x1b[36m${hash}\x1b[0m`);
-  console.log("  Requesting claim code...\n");
+// Step 2: API key — read from env or ask
+let apiKey = findFirstApiKey();
+if (!apiKey) {
+  const input = await ask("  API key (sk-...): ");
+  if (input) {
+    apiKey = input.replace(/^Bearer\s+/i, "");
+  }
+}
 
+// Step 3: Link hash → wallet via gateway
+if (apiKey) {
+  const hash = createHash("sha256").update(apiKey).digest("hex").slice(0, 32);
+  console.log(`  \x1b[90mUser hash: ${hash}\x1b[0m`);
   try {
-    const res = await fetch(`${GATEWAY}/api/claim`, {
+    const res = await fetch(`${GATEWAY}/api/link`, {
       method: "POST",
-      headers: {
-        "Authorization": `Bearer ${apiKey}`,
-      },
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ api_key: apiKey, wallet }),
     });
-    const data = await res.json() as { ok?: boolean; code?: string; user_hash?: string; error?: string };
-    if (!data.ok || !data.code) {
-      console.log(`  \x1b[31mFailed:\x1b[0m ${data.error || "unknown error"}`);
-      console.log("  Make sure you've used the gateway at least once.\n");
-      process.exit(1);
+    const data = await res.json() as { ok?: boolean; error?: string };
+    if (data.ok) {
+      console.log(`  \x1b[32m✓ Linked to wallet\x1b[0m\n`);
+    } else {
+      console.log(`  \x1b[90m${data.error || "No existing records to link — they'll link automatically on first use."}\x1b[0m\n`);
     }
-    console.log(`  \x1b[32mYour claim code: \x1b[1m${data.code}\x1b[0m`);
-    console.log("");
-    console.log("  Enter this code on the leaderboard website within 5 minutes.");
-    console.log(`  \x1b[4mhttps://token.nousai.cc\x1b[0m → Claim tab → Enter code`);
-    console.log("");
-  } catch (err) {
-    console.log(`  \x1b[31mFailed to reach gateway:\x1b[0m ${err}`);
-    console.log("");
-    process.exit(1);
+  } catch {
+    console.log("  \x1b[90mCouldn't reach gateway — linking will happen on first use.\x1b[0m\n");
   }
 } else {
-  // ── Setup: configure AI tools ──
-  console.log("");
-  console.log("  \x1b[1mnous-token setup\x1b[0m");
-  console.log("  Scanning for AI tools...\n");
-
-  let configured = 0;
-
-  for (const tool of tools) {
-    if (tool.detect()) {
-      const result = tool.configure();
-      if (result.success) {
-        console.log(`  \x1b[32m✓\x1b[0m ${tool.name.padEnd(20)} → ${result.message}`);
-        configured++;
-      } else {
-        console.log(`  \x1b[31m✗\x1b[0m ${tool.name.padEnd(20)} → ${result.message}`);
-      }
-    } else {
-      console.log(`  \x1b[90m-\x1b[0m \x1b[90m${tool.name.padEnd(20)} → not found\x1b[0m`);
-    }
-  }
-
-  console.log("");
-
-  if (configured > 0) {
-    console.log(`  \x1b[32m${configured} tool(s) configured.\x1b[0m`);
-
-    const hash = computeUserHash();
-    if (hash) {
-      console.log(`  Your user hash: \x1b[36m${hash}\x1b[0m`);
-    }
-
-    console.log("");
-    console.log(`  See your usage at \x1b[4mhttps://token.nousai.cc\x1b[0m`);
-    console.log(`  To claim your identity on the leaderboard: \x1b[1mnpx nous-token claim\x1b[0m`);
-    console.log(`  Run \x1b[1msource ~/.zshrc\x1b[0m to apply env changes in this terminal.`);
-  } else {
-    console.log("  No AI tools found. Install OpenClaw, Claude Code, Cursor, or any OpenAI-compatible tool.");
-  }
-
-  console.log("");
+  console.log("  \x1b[90mNo API key found. Wallet will link on first use through the gateway.\x1b[0m\n");
 }
+
+// Step 4: Configure tools
+console.log("  Scanning for AI tools...\n");
+
+let configured = 0;
+
+for (const tool of tools) {
+  if (tool.detect()) {
+    const result = tool.configure(wallet);
+    if (result.success) {
+      console.log(`  \x1b[32m✓\x1b[0m ${tool.name.padEnd(20)} → ${result.message}`);
+      configured++;
+    } else {
+      console.log(`  \x1b[31m✗\x1b[0m ${tool.name.padEnd(20)} → ${result.message}`);
+    }
+  } else {
+    console.log(`  \x1b[90m-\x1b[0m \x1b[90m${tool.name.padEnd(20)} → not found\x1b[0m`);
+  }
+}
+
+console.log("");
+
+if (configured > 0) {
+  console.log(`  \x1b[32m${configured} tool(s) configured.\x1b[0m`);
+  console.log(`  See your usage at \x1b[4mhttps://token.nousai.cc\x1b[0m`);
+  console.log(`  Run \x1b[1msource ~/.zshrc\x1b[0m to apply changes in this terminal.`);
+} else {
+  console.log("  No AI tools found. Install Claude Code, Cursor, or any OpenAI-compatible tool.");
+}
+
+console.log("");

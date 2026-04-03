@@ -124,12 +124,17 @@ export default {
       );
     }
 
-    const upstreamUrl = upstreamBase + apiPath + url.search;
+    // Strip nous-specific query params before forwarding
+    const upstreamParams = new URLSearchParams(url.search);
+    upstreamParams.delete("wallet");
+    const upstreamQuery = upstreamParams.toString();
+    const upstreamUrl = upstreamBase + apiPath + (upstreamQuery ? "?" + upstreamQuery : "");
 
     const upstreamHeaders = new Headers(request.headers);
     upstreamHeaders.delete("host");
     upstreamHeaders.delete("x-nous-user");
     upstreamHeaders.delete("x-nous-upstream");
+    upstreamHeaders.delete("x-nous-wallet");
 
     let upstreamResponse: Response;
     try {
@@ -146,6 +151,10 @@ export default {
     for (const [k, v] of Object.entries(corsHeaders())) {
       responseHeaders.set(k, v);
     }
+    // Wallet identity: from header (plugin) or query param (base URL tools like Claude Code)
+    const walletRaw = (request.headers.get("x-nous-wallet") || url.searchParams.get("wallet") || "").toLowerCase();
+    const validWallet = /^0x[a-f0-9]{40}$/.test(walletRaw) ? walletRaw : "";
+
     // Tell the user their hash — so they can find themselves on the leaderboard
     responseHeaders.set("x-nous-user-hash", userHash);
 
@@ -166,7 +175,7 @@ export default {
       ctx.waitUntil(
         usagePromise.then((usage) => {
           if (usage) {
-            return recordUsage(env.DB, userHash, providerName, usage, endpoint, signingKey ?? undefined);
+            return recordUsage(env.DB, userHash, providerName, usage, endpoint, signingKey ?? undefined, validWallet);
           }
         })
       );
@@ -185,7 +194,7 @@ export default {
             const parsed = JSON.parse(text) as Record<string, unknown>;
             const usage = extractUsage(parsed);
             if (usage && usage.totalTokens > 0) {
-              await recordUsage(env.DB, userHash, providerName, usage, endpoint, signingKey ?? undefined);
+              await recordUsage(env.DB, userHash, providerName, usage, endpoint, signingKey ?? undefined, validWallet);
             }
           } catch {
             // Not JSON or no usage — fine
@@ -213,21 +222,17 @@ async function handleAPI(request: Request, url: URL, env: Env): Promise<Response
   if (url.pathname === "/api/leaderboard") {
     const days = parseInt(url.searchParams.get("days") || "30");
     const limit = Math.min(parseInt(url.searchParams.get("limit") || "100"), 500);
-    const since = new Date(Date.now() - days * 86400000).toISOString();
+    const idExpr = `CASE WHEN wallet != '' THEN wallet ELSE user_hash END`;
 
-    const rows = await env.DB.prepare(
-      `SELECT user_hash,
-              SUM(total_tokens) as total_tokens,
-              SUM(input_tokens) as input_tokens,
-              SUM(output_tokens) as output_tokens,
-              SUM(cost) as total_cost,
-              COUNT(*) as call_count
-       FROM usage_records
-       WHERE timestamp > ?
-       GROUP BY user_hash
-       ORDER BY total_tokens DESC
-       LIMIT ?`
-    ).bind(since, limit).all();
+    const rows = days > 0
+      ? await env.DB.prepare(
+          `SELECT ${idExpr} as identity, MAX(wallet) as wallet, SUM(total_tokens) as total_tokens, SUM(input_tokens) as input_tokens, SUM(output_tokens) as output_tokens, SUM(cost) as total_cost, COUNT(*) as call_count
+           FROM usage_records WHERE timestamp > ? GROUP BY ${idExpr} ORDER BY total_tokens DESC LIMIT ?`
+        ).bind(new Date(Date.now() - days * 86400000).toISOString(), limit).all()
+      : await env.DB.prepare(
+          `SELECT ${idExpr} as identity, MAX(wallet) as wallet, SUM(total_tokens) as total_tokens, SUM(input_tokens) as input_tokens, SUM(output_tokens) as output_tokens, SUM(cost) as total_cost, COUNT(*) as call_count
+           FROM usage_records GROUP BY ${idExpr} ORDER BY total_tokens DESC LIMIT ?`
+        ).bind(limit).all();
 
     return json({ ok: true, data: rows.results, period_days: days });
   }
@@ -236,46 +241,58 @@ async function handleAPI(request: Request, url: URL, env: Env): Promise<Response
   if (url.pathname === "/api/leaderboard/cost") {
     const days = parseInt(url.searchParams.get("days") || "30");
     const limit = Math.min(parseInt(url.searchParams.get("limit") || "100"), 500);
-    const since = new Date(Date.now() - days * 86400000).toISOString();
+    const idExpr = `CASE WHEN wallet != '' THEN wallet ELSE user_hash END`;
 
-    const rows = await env.DB.prepare(
-      `SELECT user_hash,
-              SUM(total_tokens) as total_tokens,
-              SUM(input_tokens) as input_tokens,
-              SUM(output_tokens) as output_tokens,
-              SUM(cost) as total_cost,
-              COUNT(*) as call_count
-       FROM usage_records
-       WHERE timestamp > ? AND cost > 0
-       GROUP BY user_hash
-       HAVING SUM(cost) > 0
-       ORDER BY SUM(cost) DESC
-       LIMIT ?`
-    ).bind(since, limit).all();
+    const rows = days > 0
+      ? await env.DB.prepare(
+          `SELECT ${idExpr} as identity, MAX(wallet) as wallet, SUM(total_tokens) as total_tokens, SUM(input_tokens) as input_tokens, SUM(output_tokens) as output_tokens, SUM(cost) as total_cost, COUNT(*) as call_count
+           FROM usage_records WHERE timestamp > ? AND cost > 0 GROUP BY ${idExpr} HAVING SUM(cost) > 0 ORDER BY SUM(cost) DESC LIMIT ?`
+        ).bind(new Date(Date.now() - days * 86400000).toISOString(), limit).all()
+      : await env.DB.prepare(
+          `SELECT ${idExpr} as identity, MAX(wallet) as wallet, SUM(total_tokens) as total_tokens, SUM(input_tokens) as input_tokens, SUM(output_tokens) as output_tokens, SUM(cost) as total_cost, COUNT(*) as call_count
+           FROM usage_records WHERE cost > 0 GROUP BY ${idExpr} HAVING SUM(cost) > 0 ORDER BY SUM(cost) DESC LIMIT ?`
+        ).bind(limit).all();
 
     return json({ ok: true, data: rows.results, period_days: days });
   }
 
-  // GET /api/models — usage breakdown by model
+  // GET /api/models — usage breakdown by model (aggregated across providers)
   if (url.pathname === "/api/models") {
     const days = parseInt(url.searchParams.get("days") || "30");
-    const since = new Date(Date.now() - days * 86400000).toISOString();
 
-    const rows = await env.DB.prepare(
-      `SELECT provider, model,
-              SUM(total_tokens) as total_tokens,
-              SUM(input_tokens) as input_tokens,
-              SUM(output_tokens) as output_tokens,
-              SUM(cost) as total_cost,
-              COUNT(*) as call_count,
-              COUNT(DISTINCT user_hash) as unique_users
-       FROM usage_records
-       WHERE timestamp > ?
-       GROUP BY provider, model
-       ORDER BY total_tokens DESC`
-    ).bind(since).all();
+    const rows = days > 0
+      ? await env.DB.prepare(
+          `SELECT model, SUM(total_tokens) as total_tokens, SUM(input_tokens) as input_tokens, SUM(output_tokens) as output_tokens, SUM(cost) as total_cost, COUNT(*) as call_count, COUNT(DISTINCT user_hash) as unique_users
+           FROM usage_records WHERE timestamp > ? GROUP BY model ORDER BY total_tokens DESC`
+        ).bind(new Date(Date.now() - days * 86400000).toISOString()).all()
+      : await env.DB.prepare(
+          `SELECT model, SUM(total_tokens) as total_tokens, SUM(input_tokens) as input_tokens, SUM(output_tokens) as output_tokens, SUM(cost) as total_cost, COUNT(*) as call_count, COUNT(DISTINCT user_hash) as unique_users
+           FROM usage_records GROUP BY model ORDER BY total_tokens DESC`
+        ).all();
 
     return json({ ok: true, data: rows.results, period_days: days });
+  }
+
+  // GET /api/leaderboard/model — top users for a specific model (across all providers)
+  if (url.pathname === "/api/leaderboard/model") {
+    const model = url.searchParams.get("model") || "";
+    const days = parseInt(url.searchParams.get("days") || "30");
+    const limit = Math.min(parseInt(url.searchParams.get("limit") || "100"), 500);
+    const idExpr = `CASE WHEN wallet != '' THEN wallet ELSE user_hash END`;
+
+    if (!model) return json({ error: "model parameter required" }, 400);
+
+    const rows = days > 0
+      ? await env.DB.prepare(
+          `SELECT ${idExpr} as identity, MAX(wallet) as wallet, SUM(total_tokens) as total_tokens, SUM(input_tokens) as input_tokens, SUM(output_tokens) as output_tokens, SUM(cost) as total_cost, COUNT(*) as call_count
+           FROM usage_records WHERE model = ? AND timestamp > ? GROUP BY ${idExpr} ORDER BY total_tokens DESC LIMIT ?`
+        ).bind(model, new Date(Date.now() - days * 86400000).toISOString(), limit).all()
+      : await env.DB.prepare(
+          `SELECT ${idExpr} as identity, MAX(wallet) as wallet, SUM(total_tokens) as total_tokens, SUM(input_tokens) as input_tokens, SUM(output_tokens) as output_tokens, SUM(cost) as total_cost, COUNT(*) as call_count
+           FROM usage_records WHERE model = ? GROUP BY ${idExpr} ORDER BY total_tokens DESC LIMIT ?`
+        ).bind(model, limit).all();
+
+    return json({ ok: true, data: rows.results, model, period_days: days });
   }
 
   // GET /api/stats — global totals
@@ -289,6 +306,26 @@ async function handleAPI(request: Request, url: URL, env: Env): Promise<Response
     ).all();
 
     return json({ ok: true, data: rows.results[0] });
+  }
+
+  // GET /api/wallet/:address — usage for a wallet (aggregated across all linked hashes)
+  const walletMatch = url.pathname.match(/^\/api\/wallet\/(0x[a-f0-9]{40})$/);
+  if (walletMatch) {
+    const addr = walletMatch[1];
+    const rows = await env.DB.prepare(
+      `SELECT model,
+              SUM(total_tokens) as total_tokens,
+              SUM(input_tokens) as input_tokens,
+              SUM(output_tokens) as output_tokens,
+              SUM(cost) as total_cost,
+              COUNT(*) as call_count
+       FROM usage_records
+       WHERE wallet = ?
+       GROUP BY model
+       ORDER BY total_tokens DESC`
+    ).bind(addr).all();
+
+    return json({ ok: true, data: rows.results, wallet: addr });
   }
 
   // GET /api/user/:hash — single user stats
@@ -568,6 +605,38 @@ async function handleAPI(request: Request, url: URL, env: Env): Promise<Response
       await env.DB.prepare(`DELETE FROM claim_codes WHERE code = ?`).bind(code).run();
 
       return json({ ok: true, user_hash: row.user_hash });
+    } catch {
+      return json({ error: "Invalid request" }, 400);
+    }
+  }
+
+  // POST /api/link — link a user_hash to a wallet address
+  // Sends API key to prove ownership, gateway computes hash and binds wallet.
+  if (url.pathname === "/api/link" && request.method === "POST") {
+    try {
+      const body = await request.json() as { api_key?: string; wallet?: string };
+      const apiKey = body.api_key?.trim();
+      const wallet = body.wallet?.trim().toLowerCase();
+
+      if (!apiKey) return json({ error: "api_key required" }, 400);
+      if (!wallet || !/^0x[a-f0-9]{40}$/.test(wallet)) return json({ error: "Invalid wallet address" }, 400);
+
+      const hash = await sha256Short(apiKey.replace(/^Bearer\s+/i, ""));
+
+      // Check this hash exists
+      const exists = await env.DB.prepare(
+        `SELECT 1 FROM usage_records WHERE user_hash = ? LIMIT 1`
+      ).bind(hash).first();
+      if (!exists) {
+        return json({ error: "No usage records for this API key. Use the gateway first." }, 404);
+      }
+
+      // Link all records to wallet
+      await env.DB.prepare(
+        `UPDATE usage_records SET wallet = ? WHERE user_hash = ?`
+      ).bind(wallet, hash).run();
+
+      return json({ ok: true, user_hash: hash, wallet });
     } catch {
       return json({ error: "Invalid request" }, 400);
     }
