@@ -54,6 +54,8 @@ async function sha256(input: string): Promise<string> {
 // ── MMR ──
 
 function computeLeafHash(r: Record): Promise<string> {
+  // Model name is normalized at write time (provider/ prefix stripped)
+  // Use the stored model name as-is — it matches what was hashed at write time
   return sha256([
     r.timestamp,
     r.user_hash,

@@ -7,13 +7,21 @@
   "bin": {
     "nous-token": "./cli/setup.ts"
   },
+  "files": [
+    "cli/",
+    "index.ts",
+    "sentinel.ts",
+    "openclaw.plugin.json",
+    "README.md",
+    "PROTOCOL.md"
+  ],
   "openclaw": {
     "extensions": ["./index.ts"]
   },
   "dependencies": {
     "tsx": "^4"
   },
-  "keywords": ["ai", "llm", "usage", "tracker", "openclaw", "openai", "anthropic", "leaderboard"],
+  "keywords": ["ai", "llm", "usage", "tracker", "openclaw", "openai", "anthropic", "leaderboard", "wallet", "crypto"],
   "license": "MIT",
   "repository": {
     "type": "git",

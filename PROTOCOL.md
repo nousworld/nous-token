@@ -73,6 +73,28 @@ The gateway signs the leaf hash, not the JSON. This means:
 - What fields the user displays publicly
 - When the user stores proof
 
+## Wallet Identity
+
+Users identify themselves with an Ethereum wallet address. The wallet is the permanent identity — API keys rotate, wallets don't.
+
+### How it works
+
+1. User runs `npx nous-token setup`, enters wallet address + API key
+2. CLI computes `user_hash = SHA-256(api_key)[0:16]` locally, sends `{api_key, wallet}` to `/api/link`
+3. Gateway computes the same hash, verifies it exists in records, links all records to the wallet
+4. Future API calls include `?wallet=0x...` in the base URL (set by CLI) or `X-Nous-Wallet` header (set by plugin)
+5. Gateway stores wallet with each new record and backfills old records for the same hash
+
+### Binding rules
+
+- **First bind wins**: Once a hash is linked to a wallet, it cannot be relinked to a different wallet. This prevents rebinding with expired or leaked API keys.
+- **Multiple hashes per wallet**: A user can link multiple API keys (hashes) to the same wallet. The leaderboard aggregates all hashes under one wallet.
+- **Wallet validation**: Must be a valid Ethereum address (`0x` + 40 hex chars). Invalid addresses are silently ignored.
+
+### Leaderboard aggregation
+
+The leaderboard uses `CASE WHEN wallet != '' THEN wallet ELSE user_hash END` as the identity key. Users with wallets are aggregated by wallet; users without wallets fall back to hash-based identity.
+
 ## Privacy by Structure
 
 Not by promise — by code. Audit the source:
@@ -131,12 +153,15 @@ Both options use self-to-self transactions with data as calldata. No smart contr
 
 | Endpoint | Method | Description |
 |---|---|---|
-| `/{provider}/v1/...` | * | Proxy to LLM provider |
-| `/api/leaderboard` | GET | Top users by total tokens |
-| `/api/models` | GET | Usage breakdown by model |
+| `/{provider}/v1/...` | * | Proxy to LLM provider (append `?wallet=0x...` for identity) |
+| `/api/leaderboard` | GET | Top users by tokens (`?days=30`, `?days=0` for all time) |
+| `/api/leaderboard/model` | GET | Per-model user ranking (`?model=...&days=30`) |
+| `/api/models` | GET | Usage breakdown by model (aggregated across providers) |
 | `/api/stats` | GET | Global totals |
+| `/api/wallet/{address}` | GET | Usage for a wallet (all linked hashes aggregated) |
 | `/api/user/{hash}` | GET | Single user aggregated stats |
 | `/api/user/{hash}/receipts` | GET | Signed receipts (paginated) |
+| `/api/link` | POST | Link hash to wallet (`{api_key, wallet}`) — first bind wins |
 | `/api/records` | GET | Raw records for sentinel verification |
 | `/api/chain` | GET | Merkle root and MMR state |
 | `/api/sign` | POST | Signed summary (optional aggregation) |
@@ -148,4 +173,4 @@ Search the source to verify privacy claims:
 - `authorization`, `x-api-key` → read only to compute user hash when `X-Nous-User` is absent; value is not stored or logged
 - `request.body` → only as argument to `fetch()` (piped, not consumed)
 - `.content`, `.choices`, `.message` → absent from data-reading code
-- `headers.get()` → only for `x-nous-user`, `x-nous-upstream`, and `content-type`
+- `headers.get()` → only for `x-nous-user`, `x-nous-upstream`, `x-nous-wallet`, and `content-type`
