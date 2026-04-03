@@ -237,25 +237,6 @@ async function handleAPI(request: Request, url: URL, env: Env): Promise<Response
     return json({ ok: true, data: rows.results, period_days: days });
   }
 
-  // GET /api/leaderboard/cost — top API users by real cost (only users with provider-reported cost)
-  if (url.pathname === "/api/leaderboard/cost") {
-    const days = parseInt(url.searchParams.get("days") || "30");
-    const limit = Math.min(parseInt(url.searchParams.get("limit") || "100"), 500);
-    const idExpr = `CASE WHEN wallet != '' THEN wallet ELSE user_hash END`;
-
-    const rows = days > 0
-      ? await env.DB.prepare(
-          `SELECT ${idExpr} as identity, MAX(wallet) as wallet, SUM(total_tokens) as total_tokens, SUM(input_tokens) as input_tokens, SUM(output_tokens) as output_tokens, SUM(cost) as total_cost, COUNT(*) as call_count
-           FROM usage_records WHERE timestamp > ? AND cost > 0 GROUP BY ${idExpr} HAVING SUM(cost) > 0 ORDER BY SUM(cost) DESC LIMIT ?`
-        ).bind(new Date(Date.now() - days * 86400000).toISOString(), limit).all()
-      : await env.DB.prepare(
-          `SELECT ${idExpr} as identity, MAX(wallet) as wallet, SUM(total_tokens) as total_tokens, SUM(input_tokens) as input_tokens, SUM(output_tokens) as output_tokens, SUM(cost) as total_cost, COUNT(*) as call_count
-           FROM usage_records WHERE cost > 0 GROUP BY ${idExpr} HAVING SUM(cost) > 0 ORDER BY SUM(cost) DESC LIMIT ?`
-        ).bind(limit).all();
-
-    return json({ ok: true, data: rows.results, period_days: days });
-  }
-
   // GET /api/models — usage breakdown by model (aggregated across providers)
   if (url.pathname === "/api/models") {
     const days = parseInt(url.searchParams.get("days") || "30");
@@ -541,74 +522,6 @@ async function handleAPI(request: Request, url: URL, env: Env): Promise<Response
     }
   }
 
-  // POST /api/claim — CLI generates a 6-digit claim code
-  // AUTHENTICATION: must include API key in Authorization header.
-  // Gateway computes hash from the key to prove ownership — you can only
-  // generate a claim code for your own hash. The key is not stored.
-  if (url.pathname === "/api/claim" && request.method === "POST") {
-    // Authenticate: compute hash from API key (same logic as proxy path)
-    const authHeader = request.headers.get("authorization")
-      || request.headers.get("x-api-key")
-      || request.headers.get("x-goog-api-key")
-      || "";
-    const rawKey = authHeader.replace(/^Bearer\s+/i, "");
-    if (!rawKey) {
-      return json({ error: "Authorization header required. Send your API key to prove ownership." }, 401);
-    }
-    const hash = await sha256Short(rawKey);
-
-    // Check that this user_hash actually exists in the database
-    const exists = await env.DB.prepare(
-      `SELECT 1 FROM usage_records WHERE user_hash = ? LIMIT 1`
-    ).bind(hash).first();
-    if (!exists) {
-      return json({ error: "No usage records for this hash. Use the gateway first." }, 404);
-    }
-
-    // Generate 6-digit code
-    const code = String(Math.floor(100000 + Math.random() * 900000));
-    const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
-
-    // Clean up expired codes, then insert new one
-    await env.DB.prepare(`DELETE FROM claim_codes WHERE expires_at < ?`).bind(new Date().toISOString()).run();
-    await env.DB.prepare(
-      `INSERT OR REPLACE INTO claim_codes (code, user_hash, expires_at) VALUES (?, ?, ?)`
-    ).bind(code, hash, expiresAt).run();
-
-    return json({ ok: true, user_hash: hash, code, expires_in: 300 });
-  }
-
-  // POST /api/claim/verify — website verifies a claim code
-  // Returns the user_hash if the code is valid and not expired.
-  if (url.pathname === "/api/claim/verify" && request.method === "POST") {
-    try {
-      const body = await request.json() as { code?: string };
-      const code = body.code?.trim();
-      if (!code || !/^\d{6}$/.test(code)) {
-        return json({ error: "Invalid code format" }, 400);
-      }
-
-      const row = await env.DB.prepare(
-        `SELECT user_hash, expires_at FROM claim_codes WHERE code = ?`
-      ).bind(code).first<{ user_hash: string; expires_at: string }>();
-
-      if (!row) {
-        return json({ error: "Invalid code" }, 404);
-      }
-
-      if (new Date(row.expires_at) < new Date()) {
-        await env.DB.prepare(`DELETE FROM claim_codes WHERE code = ?`).bind(code).run();
-        return json({ error: "Code expired" }, 410);
-      }
-
-      // Code is valid — delete it (one-time use) and return the hash
-      await env.DB.prepare(`DELETE FROM claim_codes WHERE code = ?`).bind(code).run();
-
-      return json({ ok: true, user_hash: row.user_hash });
-    } catch {
-      return json({ error: "Invalid request" }, 400);
-    }
-  }
 
   // POST /api/link — link a user_hash to a wallet address
   // Sends API key to prove ownership, gateway computes hash and binds wallet.
@@ -629,6 +542,15 @@ async function handleAPI(request: Request, url: URL, env: Env): Promise<Response
       ).bind(hash).first();
       if (!exists) {
         return json({ error: "No usage records for this API key. Use the gateway first." }, 404);
+      }
+
+      // Lock: check if already bound to a different wallet
+      const existing = await env.DB.prepare(
+        `SELECT wallet FROM usage_records WHERE user_hash = ? AND wallet != '' LIMIT 1`
+      ).bind(hash).first<{ wallet: string }>();
+
+      if (existing && existing.wallet !== wallet) {
+        return json({ error: "This hash is already linked to another wallet." }, 409);
       }
 
       // Link all records to wallet

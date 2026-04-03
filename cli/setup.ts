@@ -162,11 +162,12 @@ function setShellEnv(key: string, value: string, toolName: string): ConfigResult
 
   if (existsSync(rcFile)) {
     const content = readFileSync(rcFile, "utf-8");
-    if (content.includes(`${key}=`) && content.includes("nousai")) {
+    // Check if already configured with the exact same value
+    if (content.includes(`${key}="${value}"`)) {
       return { success: true, message: "already configured" };
     }
-    // Remove old setting if exists
-    const lines = content.split("\n").filter(l => !l.includes(`${key}=`) || !l.includes("nousai"));
+    // Remove old nous-token setting if exists, then write new one
+    const lines = content.split("\n").filter(l => !(l.includes(`${key}=`) && l.includes("nousai")));
     lines.push(`export ${key}="${value}"  # nous-token gateway`);
     writeFileSync(rcFile, lines.join("\n"));
   } else {

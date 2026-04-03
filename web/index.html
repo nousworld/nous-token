@@ -77,7 +77,6 @@ nav { border-bottom:1px solid var(--silk); background:var(--parchment); position
 .user-hash { font-family:'SF Mono','Fira Code',monospace; font-size:12px; color:var(--sage); }
 .wallet-addr { color:var(--teal); }
 .tokens { font-weight:600; color:var(--charcoal); }
-.cost { color:var(--amber); font-weight:500; }
 .calls { color:var(--sage); }
 .model-name { font-weight:600; }
 .provider-badge { font-size:10px; padding:3px 8px; border-radius:6px; background:var(--teal-w); color:var(--teal); font-weight:600; letter-spacing:.5px; }
@@ -110,13 +109,10 @@ nav { border-bottom:1px solid var(--silk); background:var(--parchment); position
 .proof-btn-outline:hover { background:var(--teal-w); }
 .proof-desc { font-size:12px; color:var(--sage); margin-top:10px; line-height:1.6; }
 
-/* Claim */
+/* Setup */
 .claim-box { max-width:440px; margin:0 auto; text-align:center; padding:40px 0; }
 .claim-title { font-size:18px; font-weight:600; margin-bottom:8px; }
 .claim-desc { font-size:13px; color:var(--sage); margin-bottom:28px; line-height:1.7; }
-.claim-input { width:200px; padding:14px; border-radius:10px; border:1px solid var(--silk); background:var(--white); color:var(--charcoal); font-size:28px; font-weight:700; font-family:'SF Mono','Fira Code',monospace; text-align:center; letter-spacing:8px; outline:none; transition:border .15s; }
-.claim-input:focus { border-color:var(--teal); box-shadow:0 0 0 3px var(--teal-w); }
-.claim-input::placeholder { color:var(--clay); font-size:16px; letter-spacing:4px; font-weight:400; }
 
 /* Footer */
 footer { position:fixed; bottom:0; left:0; right:0; padding:14px 40px; text-align:center; font-size:12px; color:var(--clay); border-top:1px solid var(--silk); background:var(--parchment); z-index:50; }
@@ -187,16 +183,9 @@ footer a:hover { text-decoration:underline; }
 <div class="content">
   <!-- Leaderboard -->
   <div class="section active" id="sec-leaderboard">
-    <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px;flex-wrap:wrap">
-      <div style="display:flex;gap:4px">
-        <button class="period-btn active" id="lbModeTokens" onclick="setLeaderboardMode('tokens')">By Tokens</button>
-        <button class="period-btn" id="lbModeCost" onclick="setLeaderboardMode('cost')">By Cost</button>
-      </div>
-      <div style="height:16px;width:1px;background:var(--silk)"></div>
-      <div class="period-row" style="margin-bottom:0">
-        <button class="period-btn active" onclick="setPeriod(30,this)">30d</button>
-        <button class="period-btn" onclick="setPeriod(0,this)">All Time</button>
-      </div>
+    <div class="period-row">
+      <button class="period-btn active" onclick="setPeriod(30,this)">30d</button>
+      <button class="period-btn" onclick="setPeriod(0,this)">All Time</button>
     </div>
     <div id="leaderboardContent"><div class="loading">Loading...</div></div>
   </div>
@@ -256,7 +245,7 @@ footer a:hover { text-decoration:underline; }
 var API = 'https://gateway.nousai.cc';
 if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') API = 'http://localhost:8787';
 
-var currentPeriod = 30, currentModelPeriod = 30, currentLbMode = 'tokens';
+var currentPeriod = 30, currentModelPeriod = 30;
 
 // ── Pulse Canvas (subtle grid of dots that glow) ──
 (function(){
@@ -322,21 +311,6 @@ function animateCounter(el, target, duration) {
   requestAnimationFrame(step);
 }
 
-// ── Pricing (USD per 1M tokens) ──
-var PRICING = {
-  'claude-opus-4-6':{input:15,output:75},'claude-sonnet-4-6':{input:3,output:15},'claude-haiku-4-5':{input:0.8,output:4},
-  'gpt-4o':{input:2.5,output:10},'gpt-4o-mini':{input:0.15,output:0.6},'gpt-4.1':{input:2,output:8},'gpt-4.1-mini':{input:0.4,output:1.6},'gpt-4.1-nano':{input:0.1,output:0.4},
-  'o3':{input:2,output:8},'o3-mini':{input:1.1,output:4.4},'o4-mini':{input:1.1,output:4.4},
-  'gemini-2.5-pro':{input:1.25,output:10},'gemini-2.5-flash':{input:0.15,output:0.6},'gemini-2.0-flash':{input:0.1,output:0.4},
-  'deepseek-chat':{input:0.27,output:1.1},'deepseek-reasoner':{input:0.55,output:2.19},
-  'llama-3.3-70b-versatile':{input:0.59,output:0.79},'mistral-large-latest':{input:2,output:6},
-};
-function estimateCost(model, inp, out) {
-  var p=PRICING[model]||PRICING[model.replace(/-\d{8}$/,'')]||PRICING[model.replace(/-latest$/,'')];
-  if(!p)return -1; return(inp*p.input/1e6)+(out*p.output/1e6);
-}
-function formatCost(c){if(c<0)return'\u2014';if(c<0.01)return'<$0.01';if(c<1)return'$'+c.toFixed(2);if(c<1000)return'$'+c.toFixed(1);return'$'+formatNumber(Math.round(c));}
-
 // ── Tabs ──
 function showTab(name){
   document.querySelectorAll('.tab').forEach(function(t){t.classList.toggle('active',t.textContent.toLowerCase().replace(/ /g,'')==name.toLowerCase())});
@@ -358,60 +332,30 @@ async function loadStats(){
 }
 
 // ── Leaderboard ──
-function setLeaderboardMode(mode){
-  currentLbMode=mode;
-  document.getElementById('lbModeTokens').classList.toggle('active',mode==='tokens');
-  document.getElementById('lbModeCost').classList.toggle('active',mode==='cost');
-  loadLeaderboard(currentPeriod);
-}
 function setPeriod(d,b){currentPeriod=d;document.querySelectorAll('#sec-leaderboard .period-row .period-btn').forEach(function(x){x.classList.remove('active')});b.classList.add('active');loadLeaderboard(d);}
 async function loadLeaderboard(days){
   var el=document.getElementById('leaderboardContent');el.innerHTML='<div class="loading">Loading...</div>';
   try{
-    var endpoint=currentLbMode==='cost'?'/api/leaderboard/cost':'/api/leaderboard';
-    var r=await fetch(API+endpoint+'?days='+days+'&limit=100');var d=await r.json();
+    var r=await fetch(API+'/api/leaderboard?days='+days+'&limit=100');var d=await r.json();
     if(!d.ok||!d.data||d.data.length===0){
-      el.innerHTML=currentLbMode==='cost'
-        ?'<div class="loading">No API cost data yet. Cost tracking works with providers that report real billing (e.g. OpenRouter).</div>'
-        :'<div class="loading">No data yet. Be the first.</div>';
+      el.innerHTML='<div class="loading">No data yet. Be the first.</div>';
       return;
     }
-    if(currentLbMode==='cost'){
-      var maxCost=d.data[0].total_cost||1;
-      var html='<table class="table"><thead><tr><th>#</th><th>User</th><th>Cost</th><th>Tokens</th><th>Calls</th><th></th></tr></thead><tbody>';
-      for(var i=0;i<d.data.length;i++){
-        var row=d.data[i];var rc=i<3?' rank-'+(i+1):'';var id=row.identity||row.user_hash;
-        var pct=Math.round(((row.total_cost||0)/maxCost)*100);
-        html+='<tr onclick="lookupFromBoard(\''+escapeHtml(id)+'\')" style="cursor:pointer;animation-delay:'+(i*0.04)+'s">'
-          +'<td class="rank'+rc+'">'+(i+1)+'</td>'
-          +'<td class="'+identityClass(id)+'" title="'+escapeHtml(id)+'">'+escapeHtml(formatIdentity(id))+'</td>'
-          +'<td class="cost" style="font-weight:600">'+formatCost(row.total_cost)+'</td>'
-          +'<td class="tokens">'+formatNumber(row.total_tokens)+'</td>'
-          +'<td class="calls">'+formatNumber(row.call_count)+'</td>'
-          +'<td class="bar-cell"><div class="bar-bg"><div class="bar-fill" style="width:'+pct+'%"></div></div></td>'
-          +'</tr>';
-      }
-      html+='</tbody></table>';
-      html+='<div style="font-size:11px;color:var(--clay);margin-top:12px">API users only. Cost is real billing data from providers, not estimated.</div>';
-      el.innerHTML=html;
-    } else {
-      var max=d.data[0].total_tokens||1;
-      var html='<table class="table"><thead><tr><th>#</th><th>User</th><th>Tokens</th><th>Calls</th><th></th></tr></thead><tbody>';
-      for(var i=0;i<d.data.length;i++){
-        var row=d.data[i];var rc=i<3?' rank-'+(i+1):'';var id=row.identity||row.user_hash;
-        var pct=Math.round((row.total_tokens/max)*100);
-        html+='<tr onclick="lookupFromBoard(\''+escapeHtml(id)+'\')" style="cursor:pointer;animation-delay:'+(i*0.04)+'s">'
-          +'<td class="rank'+rc+'">'+(i+1)+'</td>'
-          +'<td class="'+identityClass(id)+'" title="'+escapeHtml(id)+'">'+escapeHtml(formatIdentity(id))+'</td>'
-          +'<td class="tokens">'+formatNumber(row.total_tokens)+'</td>'
-          +'<td class="calls">'+formatNumber(row.call_count)+'</td>'
-          +'<td class="bar-cell"><div class="bar-bg"><div class="bar-fill" style="width:'+pct+'%"></div></div></td>'
-          +'</tr>';
-      }
-      html+='</tbody></table>';
-      html+='<div style="font-size:11px;color:var(--clay);margin-top:12px">All users. Ranked by total token consumption. Click a user for detail.</div>';
-      el.innerHTML=html;
+    var max=d.data[0].total_tokens||1;
+    var html='<table class="table"><thead><tr><th>#</th><th>User</th><th>Tokens</th><th>Calls</th><th></th></tr></thead><tbody>';
+    for(var i=0;i<d.data.length;i++){
+      var row=d.data[i];var rc=i<3?' rank-'+(i+1):'';var id=row.identity||row.user_hash;
+      var pct=Math.round((row.total_tokens/max)*100);
+      html+='<tr onclick="lookupFromBoard(\''+escapeHtml(id)+'\')" style="cursor:pointer;animation-delay:'+(i*0.04)+'s">'
+        +'<td class="rank'+rc+'">'+(i+1)+'</td>'
+        +'<td class="'+identityClass(id)+'" title="'+escapeHtml(id)+'">'+escapeHtml(formatIdentity(id))+'</td>'
+        +'<td class="tokens">'+formatNumber(row.total_tokens)+'</td>'
+        +'<td class="calls">'+formatNumber(row.call_count)+'</td>'
+        +'<td class="bar-cell"><div class="bar-bg"><div class="bar-fill" style="width:'+pct+'%"></div></div></td>'
+        +'</tr>';
     }
+    html+='</tbody></table>';
+    el.innerHTML=html;
   }catch(e){el.innerHTML='<div class="loading">Failed to load.</div>';}
 }
 
@@ -423,21 +367,18 @@ async function loadModels(days){
     var r=await fetch(API+'/api/models?days='+days);var d=await r.json();
     if(!d.ok||!d.data||d.data.length===0){el.innerHTML='<div class="loading">No data yet.</div>';return;}
     var max=d.data[0].total_tokens||1;
-    var html='<table class="table"><thead><tr><th>Model</th><th>Tokens</th><th>Est. Cost</th><th>Users</th><th>Calls</th><th></th></tr></thead><tbody>';
+    var html='<table class="table"><thead><tr><th>Model</th><th>Tokens</th><th>Users</th><th>Calls</th><th></th></tr></thead><tbody>';
     for(var i=0;i<d.data.length;i++){
       var row=d.data[i];var pct=Math.round((row.total_tokens/max)*100);
-      var mcost=row.total_cost>0?row.total_cost:estimateCost(row.model,row.input_tokens||0,row.output_tokens||0);
       html+='<tr onclick="loadModelLeaderboard(\''+escapeHtml(row.model).replace(/'/g,"\\'")+'\','+days+')" style="cursor:pointer;animation-delay:'+(i*0.04)+'s">'
         +'<td class="model-name">'+escapeHtml(row.model)+'</td>'
         +'<td class="tokens">'+formatNumber(row.total_tokens)+'</td>'
-        +'<td class="cost">'+formatCost(mcost)+(row.total_cost>0?'':'*')+'</td>'
         +'<td>'+(row.unique_users||0)+'</td>'
         +'<td class="calls">'+formatNumber(row.call_count)+'</td>'
         +'<td class="bar-cell"><div class="bar-bg"><div class="bar-fill" style="width:'+pct+'%"></div></div></td>'
         +'</tr>';
     }
     html+='</tbody></table>';
-    html+='<div style="font-size:11px;color:var(--clay);margin-top:12px">Cost without * is real (from provider). * = estimated from public pricing.</div>';
     el.innerHTML=html;
   }catch(e){el.innerHTML='<div class="loading">Failed to load.</div>';}
 }
@@ -458,16 +399,14 @@ async function loadModelLeaderboard(model,days){
       el.innerHTML=html;return;
     }
     var max=d.data[0].total_tokens||1;
-    html+='<table class="table"><thead><tr><th>#</th><th>User</th><th>Tokens</th><th>Cost</th><th>Calls</th><th></th></tr></thead><tbody>';
+    html+='<table class="table"><thead><tr><th>#</th><th>User</th><th>Tokens</th><th>Calls</th><th></th></tr></thead><tbody>';
     for(var i=0;i<d.data.length;i++){
       var row=d.data[i];var rc=i<3?' rank-'+(i+1):'';var id=row.identity||row.user_hash;
       var pct=Math.round((row.total_tokens/max)*100);
-      var c=row.total_cost>0?row.total_cost:estimateCost(model,row.input_tokens||0,row.output_tokens||0);
       html+='<tr onclick="lookupFromBoard(\''+escapeHtml(id)+'\')" style="cursor:pointer;animation-delay:'+(i*0.04)+'s">'
         +'<td class="rank'+rc+'">'+(i+1)+'</td>'
         +'<td class="'+identityClass(id)+'" title="'+escapeHtml(id)+'">'+escapeHtml(formatIdentity(id))+'</td>'
         +'<td class="tokens">'+formatNumber(row.total_tokens)+'</td>'
-        +'<td class="cost">'+formatCost(c)+(row.total_cost>0?'':'*')+'</td>'
         +'<td class="calls">'+formatNumber(row.call_count)+'</td>'
         +'<td class="bar-cell"><div class="bar-bg"><div class="bar-fill" style="width:'+pct+'%"></div></div></td>'
         +'</tr>';
@@ -487,29 +426,24 @@ async function lookupUser(){
     var r=await fetch(API+endpoint);var d=await r.json();
     var hash=d.wallet||d.user_hash||input;
     if(!d.ok||!d.data||d.data.length===0){el.innerHTML='<div class="loading">No data found.</div>';return;}
-    var tt=0,tc=0,tco=0;
-    for(var i=0;i<d.data.length;i++){tt+=d.data[i].total_tokens||0;tc+=d.data[i].call_count||0;
-      var rc2=d.data[i].total_cost>0?d.data[i].total_cost:estimateCost(d.data[i].model,d.data[i].input_tokens||0,d.data[i].output_tokens||0);
-      if(rc2>0)tco+=rc2;
-    }
+    var tt=0,tc=0;
+    for(var i=0;i<d.data.length;i++){tt+=d.data[i].total_tokens||0;tc+=d.data[i].call_count||0;}
     var html='<div class="user-card">';
     html+='<div class="user-card-hash"'+(isWallet(hash)?' style="color:var(--teal)"':'')+'>'+escapeHtml(hash)+'</div>';
     html+='<div class="user-card-stats">';
     html+='<div class="stat"><div class="stat-value teal" style="font-size:24px">'+formatNumber(tt)+'</div><div class="stat-label">Tokens</div></div>';
-    html+='<div class="stat"><div class="stat-value" style="font-size:24px;color:var(--amber)">'+formatCost(tco)+'</div><div class="stat-label">Est. Cost</div></div>';
     html+='<div class="stat"><div class="stat-value" style="font-size:24px">'+formatNumber(tc)+'</div><div class="stat-label">Calls</div></div>';
     html+='<div class="stat"><div class="stat-value" style="font-size:24px">'+d.data.length+'</div><div class="stat-label">Models</div></div>';
     html+='</div></div>';
     var hasProvider=d.data[0]&&d.data[0].provider;
-    html+='<table class="table"><thead><tr><th>Model</th>'+(hasProvider?'<th>Provider</th>':'')+'<th>Input</th><th>Output</th><th>Est. Cost</th><th>Calls</th></tr></thead><tbody>';
+    html+='<table class="table"><thead><tr><th>Model</th>'+(hasProvider?'<th>Provider</th>':'')+'<th>Input</th><th>Output</th><th>Calls</th></tr></thead><tbody>';
     for(var i=0;i<d.data.length;i++){
-      var row=d.data[i];var rc3=row.total_cost>0?row.total_cost:estimateCost(row.model,row.input_tokens||0,row.output_tokens||0);
+      var row=d.data[i];
       html+='<tr style="animation-delay:'+(i*0.04)+'s">'
         +'<td class="model-name">'+escapeHtml(row.model)+'</td>'
         +(hasProvider?'<td><span class="provider-badge">'+escapeHtml(row.provider)+'</span></td>':'')
         +'<td>'+formatNumber(row.input_tokens)+'</td>'
         +'<td>'+formatNumber(row.output_tokens)+'</td>'
-        +'<td class="cost">'+formatCost(rc3)+(row.total_cost>0?'':'*')+'</td>'
         +'<td class="calls">'+formatNumber(row.call_count)+'</td></tr>';
     }
     html+='</tbody></table>';

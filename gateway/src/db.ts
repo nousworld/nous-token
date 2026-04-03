@@ -61,11 +61,6 @@ export async function initDB(db: D1Database): Promise<void> {
       leaf_count INTEGER NOT NULL DEFAULT 0
     )`),
     db.prepare(`INSERT OR IGNORE INTO merkle_state (id, peaks, merkle_root, leaf_count) VALUES (1, '[]', '', 0)`),
-    db.prepare(`CREATE TABLE IF NOT EXISTS claim_codes (
-      code TEXT PRIMARY KEY,
-      user_hash TEXT NOT NULL,
-      expires_at TEXT NOT NULL
-    )`),
   ]);
   // Migrations for existing databases
   try { await db.exec(`ALTER TABLE usage_records ADD COLUMN cost REAL NOT NULL DEFAULT 0`); } catch { /* exists */ }
@@ -138,10 +133,18 @@ export async function recordUsage(
     .run();
 
   // Backfill: if this user_hash has old records without wallet, link them now
+  // Lock: only bind if no other wallet has claimed this hash
   if (wallet) {
-    await db.prepare(
-      `UPDATE usage_records SET wallet = ? WHERE user_hash = ? AND wallet = ''`
-    ).bind(wallet, userHash).run();
+    const existing = await db.prepare(
+      `SELECT wallet FROM usage_records WHERE user_hash = ? AND wallet != '' LIMIT 1`
+    ).bind(userHash).first<{ wallet: string }>();
+
+    if (!existing || existing.wallet === wallet) {
+      await db.prepare(
+        `UPDATE usage_records SET wallet = ? WHERE user_hash = ? AND wallet = ''`
+      ).bind(wallet, userHash).run();
+    }
+    // If existing wallet is different, ignore — first bind wins
   }
 
   // Update MMR
