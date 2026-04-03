@@ -16,6 +16,7 @@ export interface UsageData {
   cacheReadTokens: number;
   cacheWriteTokens: number;
   totalTokens: number;
+  cost: number; // real cost from provider response, 0 if not available
 }
 
 /**
@@ -38,6 +39,12 @@ export function extractUsage(body: Record<string, unknown>): UsageData | null {
   return null;
 }
 
+/** Extract real cost from provider response if available */
+function extractCost(usage: Record<string, unknown>): number {
+  // OpenRouter, Together, Fireworks etc. include cost in usage
+  return (usage.cost as number) || 0;
+}
+
 function tryOpenAI(body: Record<string, unknown>): UsageData | null {
   const usage = body.usage as Record<string, unknown> | undefined;
   if (!usage || !("prompt_tokens" in usage || "completion_tokens" in usage)) return null;
@@ -54,14 +61,14 @@ function tryOpenAI(body: Record<string, unknown>): UsageData | null {
     cacheReadTokens: cacheRead,
     cacheWriteTokens: 0,
     totalTokens: total,
+    cost: extractCost(usage),
   };
 }
 
 function tryAnthropic(body: Record<string, unknown>): UsageData | null {
   const usage = body.usage as Record<string, unknown> | undefined;
   if (!usage || !("input_tokens" in usage)) return null;
-  // Disambiguate from OpenAI: Anthropic has input_tokens, OpenAI has prompt_tokens
-  if ("prompt_tokens" in usage) return null; // it's OpenAI format
+  if ("prompt_tokens" in usage) return null;
   const model = (body.model as string) || "unknown";
   return {
     model,
@@ -70,6 +77,7 @@ function tryAnthropic(body: Record<string, unknown>): UsageData | null {
     cacheReadTokens: (usage.cache_read_input_tokens as number) || 0,
     cacheWriteTokens: (usage.cache_creation_input_tokens as number) || 0,
     totalTokens: ((usage.input_tokens as number) || 0) + ((usage.output_tokens as number) || 0),
+    cost: extractCost(usage),
   };
 }
 
@@ -87,6 +95,7 @@ function tryGemini(body: Record<string, unknown>): UsageData | null {
     cacheReadTokens: cached,
     cacheWriteTokens: 0,
     totalTokens: (meta.totalTokenCount as number) || input + output,
+    cost: extractCost(meta),
   };
 }
 

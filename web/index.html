@@ -3,144 +3,174 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>nous-token — Global AI Usage Leaderboard</title>
+<title>NOUS Token — Global AI Usage</title>
 <meta name="description" content="See how much the world spends on AI. Open-source, verifiable, real data from provider responses.">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
 :root {
-  --bg: #0a0a0a;
-  --surface: #141414;
-  --border: #222;
-  --text: #e5e5e5;
-  --muted: #777;
-  --accent: #4ade80;
-  --accent-dim: rgba(74,222,128,0.1);
-  --orange: #fb923c;
-  --blue: #60a5fa;
-  --purple: #a78bfa;
+  --parchment: #F5F3EF;
+  --linen: #FAF8F5;
+  --white: #FFFFFF;
+  --teal: #2A7C6F;
+  --teal-deep: #237A6D;
+  --teal-w: rgba(42,124,111,0.06);
+  --teal-glow: rgba(42,124,111,0.15);
+  --charcoal: #2C2A28;
+  --sage: #9A9590;
+  --clay: #C4BFBA;
+  --silk: rgba(0,0,0,0.06);
+  --pencil: rgba(0,0,0,0.08);
+  --amber: #C4873B;
   --radius: 12px;
 }
 * { margin:0; padding:0; box-sizing:border-box; }
-body { background:var(--bg); color:var(--text); font-family:'Inter',system-ui,sans-serif; -webkit-font-smoothing:antialiased; min-height:100vh; }
-a { color:var(--accent); text-decoration:none; }
+html { scroll-behavior:smooth; }
+body { background:var(--parchment); color:var(--charcoal); font-family:'Inter',system-ui,sans-serif; -webkit-font-smoothing:antialiased; min-height:100vh; }
+::selection { background:rgba(42,124,111,0.12); }
+a { color:var(--teal); text-decoration:none; }
 a:hover { text-decoration:underline; }
 
-/* Header */
-.header { padding:24px 32px; display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid var(--border); }
-.logo { font-size:18px; font-weight:800; letter-spacing:2px; color:var(--text); }
-.logo span { color:var(--accent); }
-.header-links { display:flex; gap:16px; font-size:13px; }
-.header-links a { color:var(--muted); }
-.header-links a:hover { color:var(--text); text-decoration:none; }
+/* Nav */
+nav { border-bottom:1px solid var(--silk); background:var(--parchment); position:sticky; top:0; z-index:100; }
+.nav-inner { max-width:1000px; margin:0 auto; padding:16px 40px; display:flex; align-items:center; justify-content:space-between; }
+.nav-logo { font-size:18px; font-weight:800; letter-spacing:3px; color:var(--charcoal); cursor:default; user-select:none; }
+.nav-logo span { display:none; }
+.nav-links { display:flex; gap:24px; align-items:center; font-size:13px; }
+.nav-links a { color:var(--sage); text-decoration:none; transition:color .2s; }
+.nav-links a:hover { color:var(--charcoal); text-decoration:none; }
 
-/* Hero stats */
-.hero { padding:48px 32px 32px; text-align:center; }
-.hero-title { font-size:14px; color:var(--muted); text-transform:uppercase; letter-spacing:2px; margin-bottom:24px; }
-.stats-row { display:flex; justify-content:center; gap:48px; flex-wrap:wrap; }
+/* Hero — pulse canvas + stats */
+.hero { position:relative; padding:64px 40px 48px; text-align:center; overflow:hidden; }
+.hero canvas { position:absolute; top:0; left:0; width:100%; height:100%; opacity:0.4; pointer-events:none; }
+.hero-label { font-size:11px; text-transform:uppercase; letter-spacing:3px; color:var(--teal); font-weight:500; margin-bottom:12px; position:relative; }
+.hero-title { font-size:28px; font-weight:600; color:var(--charcoal); margin-bottom:32px; letter-spacing:-.3px; position:relative; }
+.stats-row { display:flex; justify-content:center; gap:56px; flex-wrap:wrap; position:relative; }
 .stat { text-align:center; }
-.stat-value { font-size:36px; font-weight:700; color:var(--text); font-variant-numeric:tabular-nums; }
-.stat-value.accent { color:var(--accent); }
-.stat-label { font-size:12px; color:var(--muted); margin-top:4px; text-transform:uppercase; letter-spacing:1px; }
+.stat-value { font-size:42px; font-weight:700; color:var(--charcoal); font-variant-numeric:tabular-nums; line-height:1; }
+.stat-value.teal { color:var(--teal); }
+.stat-label { font-size:11px; color:var(--sage); margin-top:8px; text-transform:uppercase; letter-spacing:2px; }
+.live-dot { display:inline-block; width:6px; height:6px; background:var(--teal); border-radius:50%; margin-left:6px; animation:pulse 2s infinite; vertical-align:middle; }
+@keyframes pulse { 0%,100%{opacity:1;box-shadow:0 0 0 0 var(--teal-glow)} 50%{opacity:.6;box-shadow:0 0 0 8px transparent} }
 
 /* Tabs */
-.tabs { display:flex; gap:0; padding:0 32px; border-bottom:1px solid var(--border); margin-top:16px; }
-.tab { padding:12px 24px; font-size:14px; font-weight:500; color:var(--muted); cursor:pointer; border-bottom:2px solid transparent; transition:all .15s; }
-.tab:hover { color:var(--text); }
-.tab.active { color:var(--accent); border-bottom-color:var(--accent); }
+.tabs { display:flex; gap:0; max-width:1000px; margin:0 auto; padding:0 40px; border-bottom:1px solid var(--silk); }
+.tab { padding:14px 24px; font-size:14px; font-weight:500; color:var(--sage); cursor:pointer; border-bottom:2px solid transparent; transition:all .15s; }
+.tab:hover { color:var(--charcoal); }
+.tab.active { color:var(--teal); border-bottom-color:var(--teal); }
 
 /* Content */
-.content { max-width:900px; margin:0 auto; padding:24px 32px 64px; }
+.content { max-width:1000px; margin:0 auto; padding:28px 40px 80px; }
 .section { display:none; }
 .section.active { display:block; }
 
 /* Table */
 .table { width:100%; border-collapse:collapse; }
-.table th { text-align:left; font-size:11px; font-weight:500; color:var(--muted); text-transform:uppercase; letter-spacing:1px; padding:10px 12px; border-bottom:1px solid var(--border); }
-.table td { padding:12px; border-bottom:1px solid var(--border); font-size:14px; font-variant-numeric:tabular-nums; }
-.table tr:hover { background:var(--surface); }
-.rank { font-weight:700; color:var(--muted); width:40px; }
-.rank-1 { color:var(--orange); }
-.rank-2 { color:var(--muted); }
-.rank-3 { color:var(--purple); }
-.user-hash { font-family:'SF Mono','Fira Code',monospace; font-size:13px; color:var(--muted); }
-.tokens { font-weight:600; }
-.calls { color:var(--muted); }
+.table th { text-align:left; font-size:10px; font-weight:600; color:var(--sage); text-transform:uppercase; letter-spacing:1.5px; padding:12px 12px; border-bottom:1px solid var(--silk); }
+.table td { padding:14px 12px; border-bottom:1px solid var(--silk); font-size:14px; font-variant-numeric:tabular-nums; }
+.table tbody tr { opacity:0; animation:fadeSlide .4s ease forwards; }
+.table tr:hover { background:var(--teal-w); }
+@keyframes fadeSlide { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+.rank { font-weight:700; color:var(--clay); width:36px; }
+.rank-1 { color:var(--amber); }
+.rank-2 { color:var(--sage); }
+.rank-3 { color:var(--teal); }
+.user-hash { font-family:'SF Mono','Fira Code',monospace; font-size:12px; color:var(--sage); }
+.tokens { font-weight:600; color:var(--charcoal); }
+.cost { color:var(--amber); font-weight:500; }
+.calls { color:var(--sage); }
 .model-name { font-weight:600; }
-.provider-badge { font-size:11px; padding:2px 8px; border-radius:4px; background:var(--accent-dim); color:var(--accent); font-weight:500; }
-.bar-cell { width:30%; }
-.bar-bg { height:6px; background:var(--surface); border-radius:3px; overflow:hidden; }
-.bar-fill { height:100%; background:var(--accent); border-radius:3px; transition:width .3s; }
+.provider-badge { font-size:10px; padding:3px 8px; border-radius:6px; background:var(--teal-w); color:var(--teal); font-weight:600; letter-spacing:.5px; }
+.bar-cell { width:25%; }
+.bar-bg { height:4px; background:var(--silk); border-radius:2px; overflow:hidden; }
+.bar-fill { height:100%; background:linear-gradient(90deg, var(--teal), var(--teal-deep)); border-radius:2px; transition:width .6s ease; }
 
 /* Period selector */
-.period-row { display:flex; gap:8px; margin-bottom:20px; }
-.period-btn { padding:6px 14px; border-radius:8px; border:1px solid var(--border); background:transparent; color:var(--muted); font-size:12px; font-family:inherit; cursor:pointer; transition:all .15s; }
-.period-btn:hover { border-color:var(--accent); color:var(--text); }
-.period-btn.active { background:var(--accent-dim); border-color:var(--accent); color:var(--accent); }
+.period-row { display:flex; gap:6px; margin-bottom:24px; }
+.period-btn { padding:6px 16px; border-radius:20px; border:1px solid var(--silk); background:transparent; color:var(--sage); font-size:12px; font-weight:500; font-family:inherit; cursor:pointer; transition:all .15s; }
+.period-btn:hover { border-color:var(--teal); color:var(--charcoal); }
+.period-btn.active { background:var(--teal); border-color:var(--teal); color:var(--white); }
 
 /* Search */
-.search-row { margin-bottom:20px; }
-.search-input { width:100%; padding:10px 14px; border-radius:8px; border:1px solid var(--border); background:var(--surface); color:var(--text); font-size:14px; font-family:inherit; outline:none; }
-.search-input:focus { border-color:var(--accent); }
-.search-input::placeholder { color:#555; }
+.search-row { margin-bottom:24px; }
+.search-input { width:100%; padding:12px 16px; border-radius:10px; border:1px solid var(--silk); background:var(--white); color:var(--charcoal); font-size:14px; font-family:inherit; outline:none; transition:border .15s; }
+.search-input:focus { border-color:var(--teal); box-shadow:0 0 0 3px var(--teal-w); }
+.search-input::placeholder { color:var(--clay); }
 
 /* User detail */
-.user-card { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:24px; margin-bottom:24px; }
-.user-card-hash { font-family:'SF Mono','Fira Code',monospace; font-size:15px; color:var(--accent); margin-bottom:8px; word-break:break-all; }
-.user-card-stats { display:flex; gap:32px; flex-wrap:wrap; }
+.user-card { background:var(--white); border:1px solid var(--silk); border-radius:var(--radius); padding:28px; margin-bottom:28px; }
+.user-card-hash { font-family:'SF Mono','Fira Code',monospace; font-size:14px; color:var(--teal); margin-bottom:12px; word-break:break-all; }
+.user-card-stats { display:flex; gap:36px; flex-wrap:wrap; }
 
-/* Proof button */
-.proof-section { margin-top:32px; padding:24px; border:1.5px dashed var(--border); border-radius:var(--radius); text-align:center; }
-.proof-btn { padding:12px 24px; border:none; border-radius:8px; background:var(--accent); color:var(--bg); font-size:14px; font-weight:600; cursor:pointer; font-family:inherit; transition:all .15s; }
-.proof-btn:hover { opacity:0.9; }
-.proof-desc { font-size:12px; color:var(--muted); margin-top:8px; }
+/* Proof / Store */
+.proof-section { margin-top:36px; padding:28px; border:1.5px dashed var(--clay); border-radius:var(--radius); text-align:center; background:var(--linen); }
+.proof-btn { padding:12px 28px; border:none; border-radius:10px; background:var(--teal); color:var(--white); font-size:14px; font-weight:600; cursor:pointer; font-family:inherit; transition:all .2s; }
+.proof-btn:hover { background:var(--teal-deep); transform:translateY(-1px); box-shadow:0 4px 12px var(--teal-glow); }
+.proof-btn-outline { background:var(--white); color:var(--teal); border:1px solid var(--teal); }
+.proof-btn-outline:hover { background:var(--teal-w); }
+.proof-desc { font-size:12px; color:var(--sage); margin-top:10px; line-height:1.6; }
+
+/* Claim */
+.claim-box { max-width:440px; margin:0 auto; text-align:center; padding:40px 0; }
+.claim-title { font-size:18px; font-weight:600; margin-bottom:8px; }
+.claim-desc { font-size:13px; color:var(--sage); margin-bottom:28px; line-height:1.7; }
+.claim-input { width:200px; padding:14px; border-radius:10px; border:1px solid var(--silk); background:var(--white); color:var(--charcoal); font-size:28px; font-weight:700; font-family:'SF Mono','Fira Code',monospace; text-align:center; letter-spacing:8px; outline:none; transition:border .15s; }
+.claim-input:focus { border-color:var(--teal); box-shadow:0 0 0 3px var(--teal-w); }
+.claim-input::placeholder { color:var(--clay); font-size:16px; letter-spacing:4px; font-weight:400; }
 
 /* Footer */
-.footer { padding:24px 32px; border-top:1px solid var(--border); text-align:center; font-size:12px; color:#444; }
-.footer a { color:#555; }
+footer { position:fixed; bottom:0; left:0; right:0; padding:14px 40px; text-align:center; font-size:12px; color:var(--clay); border-top:1px solid var(--silk); background:var(--parchment); z-index:50; }
+.content { padding-bottom:120px; }
+footer a { color:var(--teal); text-decoration:none; }
+footer a:hover { text-decoration:underline; }
 
 /* Loading */
-.loading { text-align:center; padding:48px; color:var(--muted); font-size:14px; }
+.loading { text-align:center; padding:48px; color:var(--sage); font-size:14px; }
 
 /* Responsive */
 @media(max-width:640px) {
-  .header { padding:16px; }
-  .hero { padding:32px 16px 24px; }
+  .nav-inner { padding:14px 20px; }
+  .hero { padding:40px 20px 32px; }
   .stats-row { gap:24px; }
-  .stat-value { font-size:24px; }
-  .tabs { padding:0 16px; overflow-x:auto; }
-  .tab { padding:10px 16px; font-size:13px; white-space:nowrap; }
-  .content { padding:16px 16px 48px; }
-  .table td, .table th { padding:8px 6px; font-size:12px; }
+  .stat-value { font-size:28px; }
+  .tabs { padding:0 20px; overflow-x:auto; }
+  .tab { padding:12px 16px; font-size:13px; white-space:nowrap; }
+  .content { padding:20px 20px 60px; }
+  .table td, .table th { padding:10px 6px; font-size:12px; }
+  .user-hash { font-size:10px; }
 }
 </style>
 </head>
 <body>
 
-<div class="header">
-  <div class="logo">NOUS<span>·</span>TOKEN</div>
-  <div class="header-links">
-    <a href="https://github.com/nousworld/nous-token" target="_blank">GitHub</a>
-    <a href="https://github.com/nousworld/nous-token/blob/main/PROTOCOL.md" target="_blank">Protocol</a>
+<nav>
+  <div class="nav-inner">
+    <div class="nav-logo">nous</div>
+    <div class="nav-links">
+      <a href="https://github.com/nousworld/nous-token" target="_blank">GitHub</a>
+      <a href="https://github.com/nousworld/nous-token/blob/main/PROTOCOL.md" target="_blank">Protocol</a>
+    </div>
   </div>
-</div>
+</nav>
 
 <div class="hero">
-  <div class="hero-title">Global AI Usage</div>
+  <canvas id="pulseCanvas"></canvas>
+  <div class="hero-label">Global AI Usage<span class="live-dot"></span></div>
+  <div class="hero-title">Every token, verified.</div>
   <div class="stats-row">
     <div class="stat">
-      <div class="stat-value accent" id="statTokens">—</div>
-      <div class="stat-label">Total Tokens</div>
+      <div class="stat-value teal" id="statTokens">0</div>
+      <div class="stat-label">Tokens</div>
     </div>
     <div class="stat">
-      <div class="stat-value" id="statCalls">—</div>
+      <div class="stat-value" id="statCalls">0</div>
       <div class="stat-label">API Calls</div>
     </div>
     <div class="stat">
-      <div class="stat-value" id="statUsers">—</div>
+      <div class="stat-value" id="statUsers">0</div>
       <div class="stat-label">Users</div>
     </div>
     <div class="stat">
-      <div class="stat-value" id="statModels">—</div>
+      <div class="stat-value" id="statModels">0</div>
       <div class="stat-label">Models</div>
     </div>
   </div>
@@ -156,11 +186,18 @@ a:hover { text-decoration:underline; }
 <div class="content">
   <!-- Leaderboard -->
   <div class="section active" id="sec-leaderboard">
-    <div class="period-row">
-      <button class="period-btn" onclick="setPeriod(7,this)">7d</button>
-      <button class="period-btn active" onclick="setPeriod(30,this)">30d</button>
-      <button class="period-btn" onclick="setPeriod(90,this)">90d</button>
-      <button class="period-btn" onclick="setPeriod(365,this)">1y</button>
+    <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px;flex-wrap:wrap">
+      <div style="display:flex;gap:4px">
+        <button class="period-btn active" id="lbModeTokens" onclick="setLeaderboardMode('tokens')">By Tokens</button>
+        <button class="period-btn" id="lbModeCost" onclick="setLeaderboardMode('cost')">By Cost</button>
+      </div>
+      <div style="height:16px;width:1px;background:var(--silk)"></div>
+      <div class="period-row" style="margin-bottom:0">
+        <button class="period-btn" onclick="setPeriod(7,this)">7d</button>
+        <button class="period-btn active" onclick="setPeriod(30,this)">30d</button>
+        <button class="period-btn" onclick="setPeriod(90,this)">90d</button>
+        <button class="period-btn" onclick="setPeriod(365,this)">1y</button>
+      </div>
     </div>
     <div id="leaderboardContent"><div class="loading">Loading...</div></div>
   </div>
@@ -181,421 +218,328 @@ a:hover { text-decoration:underline; }
       <input class="search-input" id="lookupInput" placeholder="Enter your user hash..." onkeydown="if(event.key==='Enter')lookupUser()">
     </div>
     <div id="lookupContent">
-      <div style="text-align:center;padding:32px;color:var(--muted)">
+      <div style="text-align:center;padding:40px;color:var(--sage)">
         Enter your user hash to see your AI usage breakdown.<br>
-        <span style="font-size:12px;margin-top:8px;display:block">Find your hash: run <code style="background:var(--surface);padding:2px 6px;border-radius:4px">npx nous-token claim</code> in your terminal, or check the <code style="background:var(--surface);padding:2px 6px;border-radius:4px">x-nous-user-hash</code> response header.</span>
+        <span style="font-size:12px;margin-top:8px;display:block;color:var(--clay)">
+          Run <code style="background:var(--white);padding:2px 8px;border-radius:6px;border:1px solid var(--silk);font-size:12px">npx nous-token claim</code> to find your hash.
+        </span>
       </div>
     </div>
   </div>
 
   <!-- Claim -->
   <div class="section" id="sec-claim">
-    <div style="max-width:480px;margin:0 auto;text-align:center;padding:24px 0">
-      <div style="font-size:16px;font-weight:600;margin-bottom:8px">Claim your identity</div>
-      <div style="font-size:13px;color:var(--muted);margin-bottom:24px">
-        Run <code style="background:var(--surface);padding:2px 6px;border-radius:4px">npx nous-token claim</code> in your terminal to get a 6-digit code.<br>
-        This proves you own the API key behind a hash — without exposing the key.
+    <div class="claim-box">
+      <div class="claim-title">Claim your identity</div>
+      <div class="claim-desc">
+        Run <code style="background:var(--white);padding:2px 8px;border-radius:6px;border:1px solid var(--silk);font-size:12px">npx nous-token claim</code> in your terminal to get a 6-digit code.<br>
+        This proves you own the API key behind a hash.
       </div>
-      <div class="search-row">
-        <input class="search-input" id="claimInput" placeholder="Enter 6-digit claim code" maxlength="6" style="text-align:center;font-size:24px;letter-spacing:8px;font-weight:700" onkeydown="if(event.key==='Enter')verifyClaim()">
+      <div style="margin-bottom:16px">
+        <input class="claim-input" id="claimInput" placeholder="------" maxlength="6" onkeydown="if(event.key==='Enter')verifyClaim()">
       </div>
-      <button class="proof-btn" style="margin-top:12px" onclick="verifyClaim()">Verify</button>
-      <div id="claimResult" style="margin-top:20px"></div>
+      <button class="proof-btn" onclick="verifyClaim()">Verify</button>
+      <div id="claimResult" style="margin-top:24px"></div>
     </div>
   </div>
 </div>
 
-<div class="footer">
-  <a href="https://github.com/nousworld/nous-token" target="_blank">nous-token</a> — open-source AI usage tracker. Data from real provider responses. Code auditable. Don't trust, verify.
-</div>
+<footer>
+  <a href="https://github.com/nousworld/nous-token" target="_blank">nous-token</a> &middot;
+  Open-source AI usage tracker. Don't trust, verify.
+</footer>
 
 <script>
 var API = 'https://gateway.nousai.cc';
+if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') API = 'http://localhost:8787';
 
-// For local dev, point to local
-if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
-  API = 'http://localhost:8787';
+var currentPeriod = 30, currentModelPeriod = 30, currentLbMode = 'tokens';
+
+// ── Pulse Canvas (subtle grid of dots that glow) ──
+(function(){
+  var c = document.getElementById('pulseCanvas');
+  var ctx = c.getContext('2d');
+  var dots = [];
+  var W, H;
+  function resize(){
+    W = c.width = c.offsetWidth * devicePixelRatio;
+    H = c.height = c.offsetHeight * devicePixelRatio;
+    ctx.scale(devicePixelRatio, devicePixelRatio);
+    dots = [];
+    var spacing = 48;
+    var cols = Math.ceil(c.offsetWidth / spacing);
+    var rows = Math.ceil(c.offsetHeight / spacing);
+    for(var r=0;r<rows;r++) for(var cl=0;cl<cols;cl++){
+      dots.push({x:cl*spacing+spacing/2, y:r*spacing+spacing/2, phase:Math.random()*Math.PI*2, speed:0.3+Math.random()*0.7, active:Math.random()<0.15});
+    }
+  }
+  function draw(t){
+    ctx.clearRect(0,0,c.offsetWidth,c.offsetHeight);
+    for(var i=0;i<dots.length;i++){
+      var d=dots[i];
+      var alpha;
+      if(d.active){
+        alpha = 0.08 + 0.2 * Math.sin(t*0.001*d.speed + d.phase);
+        if(Math.random()<0.002){ d.active=false; }
+      } else {
+        alpha = 0.03;
+        if(Math.random()<0.001){ d.active=true; d.phase=t*0.001; }
+      }
+      ctx.beginPath();
+      ctx.arc(d.x, d.y, d.active ? 2.5 : 1.5, 0, Math.PI*2);
+      ctx.fillStyle = 'rgba(42,124,111,' + alpha + ')';
+      ctx.fill();
+      if(d.active){
+        ctx.beginPath();
+        ctx.arc(d.x, d.y, 8, 0, Math.PI*2);
+        ctx.fillStyle = 'rgba(42,124,111,' + (alpha*0.3) + ')';
+        ctx.fill();
+      }
+    }
+    requestAnimationFrame(draw);
+  }
+  resize();
+  window.addEventListener('resize', resize);
+  requestAnimationFrame(draw);
+})();
+
+// ── Counter Animation ──
+function animateCounter(el, target, duration) {
+  var start = parseInt(el.textContent.replace(/[^0-9]/g,'')) || 0;
+  if (start === target) return;
+  var startTime = null;
+  function step(ts) {
+    if (!startTime) startTime = ts;
+    var progress = Math.min((ts - startTime) / duration, 1);
+    var ease = 1 - Math.pow(1 - progress, 3);
+    var current = Math.round(start + (target - start) * ease);
+    el.textContent = formatNumber(current);
+    if (progress < 1) requestAnimationFrame(step);
+  }
+  requestAnimationFrame(step);
 }
-
-var currentPeriod = 30;
-var currentModelPeriod = 30;
 
 // ── Pricing (USD per 1M tokens) ──
 var PRICING = {
-  // Anthropic
-  'claude-opus-4-6':     { input: 15,   output: 75 },
-  'claude-sonnet-4-6':   { input: 3,    output: 15 },
-  'claude-haiku-4-5':    { input: 0.8,  output: 4 },
-  // OpenAI
-  'gpt-4o':              { input: 2.5,  output: 10 },
-  'gpt-4o-mini':         { input: 0.15, output: 0.6 },
-  'gpt-4.1':             { input: 2,    output: 8 },
-  'gpt-4.1-mini':        { input: 0.4,  output: 1.6 },
-  'gpt-4.1-nano':        { input: 0.1,  output: 0.4 },
-  'o3':                  { input: 2,    output: 8 },
-  'o3-mini':             { input: 1.1,  output: 4.4 },
-  'o4-mini':             { input: 1.1,  output: 4.4 },
-  // Google
-  'gemini-2.5-pro':      { input: 1.25, output: 10 },
-  'gemini-2.5-flash':    { input: 0.15, output: 0.6 },
-  'gemini-2.0-flash':    { input: 0.1,  output: 0.4 },
-  // DeepSeek
-  'deepseek-chat':       { input: 0.27, output: 1.1 },
-  'deepseek-reasoner':   { input: 0.55, output: 2.19 },
-  // Groq
-  'llama-3.3-70b-versatile': { input: 0.59, output: 0.79 },
-  // Mistral
-  'mistral-large-latest': { input: 2, output: 6 },
+  'claude-opus-4-6':{input:15,output:75},'claude-sonnet-4-6':{input:3,output:15},'claude-haiku-4-5':{input:0.8,output:4},
+  'gpt-4o':{input:2.5,output:10},'gpt-4o-mini':{input:0.15,output:0.6},'gpt-4.1':{input:2,output:8},'gpt-4.1-mini':{input:0.4,output:1.6},'gpt-4.1-nano':{input:0.1,output:0.4},
+  'o3':{input:2,output:8},'o3-mini':{input:1.1,output:4.4},'o4-mini':{input:1.1,output:4.4},
+  'gemini-2.5-pro':{input:1.25,output:10},'gemini-2.5-flash':{input:0.15,output:0.6},'gemini-2.0-flash':{input:0.1,output:0.4},
+  'deepseek-chat':{input:0.27,output:1.1},'deepseek-reasoner':{input:0.55,output:2.19},
+  'llama-3.3-70b-versatile':{input:0.59,output:0.79},'mistral-large-latest':{input:2,output:6},
 };
-
-function estimateCost(model, inputTokens, outputTokens) {
-  // Try exact match, then strip version suffix
-  var p = PRICING[model]
-    || PRICING[model.replace(/-\d{8}$/, '')]
-    || PRICING[model.replace(/-latest$/, '')];
-  if (!p) return -1;
-  return (inputTokens * p.input / 1000000) + (outputTokens * p.output / 1000000);
+function estimateCost(model, inp, out) {
+  var p=PRICING[model]||PRICING[model.replace(/-\d{8}$/,'')]||PRICING[model.replace(/-latest$/,'')];
+  if(!p)return -1; return(inp*p.input/1e6)+(out*p.output/1e6);
 }
-
-function formatCost(cost) {
-  if (cost < 0) return '—';
-  if (cost < 0.01) return '<$0.01';
-  if (cost < 1) return '$' + cost.toFixed(2);
-  if (cost < 1000) return '$' + cost.toFixed(1);
-  return '$' + formatNumber(Math.round(cost));
-}
+function formatCost(c){if(c<0)return'\u2014';if(c<0.01)return'<$0.01';if(c<1)return'$'+c.toFixed(2);if(c<1000)return'$'+c.toFixed(1);return'$'+formatNumber(Math.round(c));}
 
 // ── Tabs ──
-function showTab(name) {
-  document.querySelectorAll('.tab').forEach(function(t, i) {
-    t.classList.toggle('active', t.textContent.toLowerCase().replace(/ /g,'') === name.toLowerCase());
-  });
-  document.querySelectorAll('.section').forEach(function(s) {
-    s.classList.toggle('active', s.id === 'sec-' + name);
-  });
-  if (name === 'models' && !document.getElementById('modelsContent').querySelector('table')) {
-    loadModels(currentModelPeriod);
-  }
+function showTab(name){
+  document.querySelectorAll('.tab').forEach(function(t){t.classList.toggle('active',t.textContent.toLowerCase().replace(/ /g,'')==name.toLowerCase())});
+  document.querySelectorAll('.section').forEach(function(s){s.classList.toggle('active',s.id==='sec-'+name)});
+  if(name==='models'&&!document.getElementById('modelsContent').querySelector('table'))loadModels(currentModelPeriod);
 }
 
 // ── Stats ──
-async function loadStats() {
-  try {
-    var r = await fetch(API + '/api/stats');
-    var d = await r.json();
-    if (d.ok && d.data) {
-      document.getElementById('statTokens').textContent = formatNumber(d.data.total_tokens || 0);
-      document.getElementById('statCalls').textContent = formatNumber(d.data.total_calls || 0);
-      document.getElementById('statUsers').textContent = formatNumber(d.data.total_users || 0);
-      document.getElementById('statModels').textContent = d.data.total_models || 0;
+async function loadStats(){
+  try{
+    var r=await fetch(API+'/api/stats');var d=await r.json();
+    if(d.ok&&d.data){
+      animateCounter(document.getElementById('statTokens'), d.data.total_tokens||0, 1200);
+      animateCounter(document.getElementById('statCalls'), d.data.total_calls||0, 1000);
+      animateCounter(document.getElementById('statUsers'), d.data.total_users||0, 800);
+      var me=document.getElementById('statModels');me.textContent=d.data.total_models||0;
     }
-  } catch(e) { console.error('Stats failed:', e); }
+  }catch(e){}
 }
 
 // ── Leaderboard ──
-function setPeriod(days, btn) {
-  currentPeriod = days;
-  document.querySelectorAll('#sec-leaderboard .period-btn').forEach(function(b) { b.classList.remove('active'); });
-  btn.classList.add('active');
-  loadLeaderboard(days);
+function setLeaderboardMode(mode){
+  currentLbMode=mode;
+  document.getElementById('lbModeTokens').classList.toggle('active',mode==='tokens');
+  document.getElementById('lbModeCost').classList.toggle('active',mode==='cost');
+  loadLeaderboard(currentPeriod);
 }
-
-async function loadLeaderboard(days) {
-  var el = document.getElementById('leaderboardContent');
-  el.innerHTML = '<div class="loading">Loading...</div>';
-  try {
-    var r = await fetch(API + '/api/leaderboard?days=' + days + '&limit=100');
-    var d = await r.json();
-    if (!d.ok || !d.data || d.data.length === 0) {
-      el.innerHTML = '<div class="loading">No data yet. Be the first — install the plugin.</div>';
+function setPeriod(d,b){currentPeriod=d;document.querySelectorAll('#sec-leaderboard .period-row .period-btn').forEach(function(x){x.classList.remove('active')});b.classList.add('active');loadLeaderboard(d);}
+async function loadLeaderboard(days){
+  var el=document.getElementById('leaderboardContent');el.innerHTML='<div class="loading">Loading...</div>';
+  try{
+    var endpoint=currentLbMode==='cost'?'/api/leaderboard/cost':'/api/leaderboard';
+    var r=await fetch(API+endpoint+'?days='+days+'&limit=100');var d=await r.json();
+    if(!d.ok||!d.data||d.data.length===0){
+      el.innerHTML=currentLbMode==='cost'
+        ?'<div class="loading">No API cost data yet. Cost tracking works with providers that report real billing (e.g. OpenRouter).</div>'
+        :'<div class="loading">No data yet. Be the first.</div>';
       return;
     }
-    var maxTokens = d.data[0].total_tokens || 1;
-    var html = '<table class="table"><tr><th>#</th><th>User</th><th>Tokens</th><th>Est. Cost</th><th>Calls</th><th></th></tr>';
-    for (var i = 0; i < d.data.length; i++) {
-      var row = d.data[i];
-      var rankClass = i < 3 ? ' rank-' + (i+1) : '';
-      var pct = Math.round((row.total_tokens / maxTokens) * 100);
-      // Rough cost estimate using blended average ($3/1M input, $12/1M output)
-      var cost = (row.input_tokens || 0) * 3 / 1000000 + (row.output_tokens || 0) * 12 / 1000000;
-      html += '<tr onclick="lookupFromBoard(\'' + row.user_hash + '\')" style="cursor:pointer">'
-        + '<td class="rank' + rankClass + '">' + (i+1) + '</td>'
-        + '<td class="user-hash">' + escapeHtml(row.user_hash) + '</td>'
-        + '<td class="tokens">' + formatNumber(row.total_tokens) + '</td>'
-        + '<td style="color:var(--orange)">' + formatCost(cost) + '</td>'
-        + '<td class="calls">' + formatNumber(row.call_count) + '</td>'
-        + '<td class="bar-cell"><div class="bar-bg"><div class="bar-fill" style="width:' + pct + '%"></div></div></td>'
-        + '</tr>';
+    if(currentLbMode==='cost'){
+      var maxCost=d.data[0].total_cost||1;
+      var html='<table class="table"><thead><tr><th>#</th><th>User</th><th>Cost</th><th>Tokens</th><th>Calls</th><th></th></tr></thead><tbody>';
+      for(var i=0;i<d.data.length;i++){
+        var row=d.data[i];var rc=i<3?' rank-'+(i+1):'';
+        var pct=Math.round(((row.total_cost||0)/maxCost)*100);
+        html+='<tr onclick="lookupFromBoard(\''+row.user_hash+'\')" style="cursor:pointer;animation-delay:'+(i*0.04)+'s">'
+          +'<td class="rank'+rc+'">'+(i+1)+'</td>'
+          +'<td class="user-hash">'+escapeHtml(row.user_hash)+'</td>'
+          +'<td class="cost" style="font-weight:600">'+formatCost(row.total_cost)+'</td>'
+          +'<td class="tokens">'+formatNumber(row.total_tokens)+'</td>'
+          +'<td class="calls">'+formatNumber(row.call_count)+'</td>'
+          +'<td class="bar-cell"><div class="bar-bg"><div class="bar-fill" style="width:'+pct+'%"></div></div></td>'
+          +'</tr>';
+      }
+      html+='</tbody></table>';
+      html+='<div style="font-size:11px;color:var(--clay);margin-top:12px">API users only. Cost is real billing data from providers, not estimated.</div>';
+      el.innerHTML=html;
+    } else {
+      var max=d.data[0].total_tokens||1;
+      var html='<table class="table"><thead><tr><th>#</th><th>User</th><th>Tokens</th><th>Calls</th><th></th></tr></thead><tbody>';
+      for(var i=0;i<d.data.length;i++){
+        var row=d.data[i];var rc=i<3?' rank-'+(i+1):'';
+        var pct=Math.round((row.total_tokens/max)*100);
+        html+='<tr onclick="lookupFromBoard(\''+row.user_hash+'\')" style="cursor:pointer;animation-delay:'+(i*0.04)+'s">'
+          +'<td class="rank'+rc+'">'+(i+1)+'</td>'
+          +'<td class="user-hash">'+escapeHtml(row.user_hash)+'</td>'
+          +'<td class="tokens">'+formatNumber(row.total_tokens)+'</td>'
+          +'<td class="calls">'+formatNumber(row.call_count)+'</td>'
+          +'<td class="bar-cell"><div class="bar-bg"><div class="bar-fill" style="width:'+pct+'%"></div></div></td>'
+          +'</tr>';
+      }
+      html+='</tbody></table>';
+      html+='<div style="font-size:11px;color:var(--clay);margin-top:12px">All users. Ranked by total token consumption. Click a user for detail.</div>';
+      el.innerHTML=html;
     }
-    html += '</table>';
-    html += '<div style="font-size:11px;color:#444;margin-top:8px">* Cost is estimated using blended average pricing. Click a user for per-model breakdown.</div>';
-    el.innerHTML = html;
-  } catch(e) {
-    el.innerHTML = '<div class="loading">Failed to load. Gateway may be offline.</div>';
-  }
+  }catch(e){el.innerHTML='<div class="loading">Failed to load.</div>';}
 }
 
 // ── Models ──
-function setModelPeriod(days, btn) {
-  currentModelPeriod = days;
-  document.querySelectorAll('#sec-models .period-btn').forEach(function(b) { b.classList.remove('active'); });
-  btn.classList.add('active');
-  loadModels(days);
+function setModelPeriod(d,b){currentModelPeriod=d;document.querySelectorAll('#sec-models .period-btn').forEach(function(x){x.classList.remove('active')});b.classList.add('active');loadModels(d);}
+async function loadModels(days){
+  var el=document.getElementById('modelsContent');el.innerHTML='<div class="loading">Loading...</div>';
+  try{
+    var r=await fetch(API+'/api/models?days='+days);var d=await r.json();
+    if(!d.ok||!d.data||d.data.length===0){el.innerHTML='<div class="loading">No data yet.</div>';return;}
+    var max=d.data[0].total_tokens||1;
+    var html='<table class="table"><thead><tr><th>Model</th><th>Provider</th><th>Tokens</th><th>Est. Cost</th><th>Users</th><th>Calls</th><th></th></tr></thead><tbody>';
+    for(var i=0;i<d.data.length;i++){
+      var row=d.data[i];var pct=Math.round((row.total_tokens/max)*100);
+      var mcost=row.total_cost>0?row.total_cost:estimateCost(row.model,row.input_tokens||0,row.output_tokens||0);
+      html+='<tr style="animation-delay:'+(i*0.04)+'s">'
+        +'<td class="model-name">'+escapeHtml(row.model)+'</td>'
+        +'<td><span class="provider-badge">'+escapeHtml(row.provider)+'</span></td>'
+        +'<td class="tokens">'+formatNumber(row.total_tokens)+'</td>'
+        +'<td class="cost">'+formatCost(mcost)+(row.total_cost>0?'':'*')+'</td>'
+        +'<td>'+(row.unique_users||0)+'</td>'
+        +'<td class="calls">'+formatNumber(row.call_count)+'</td>'
+        +'<td class="bar-cell"><div class="bar-bg"><div class="bar-fill" style="width:'+pct+'%"></div></div></td>'
+        +'</tr>';
+    }
+    html+='</tbody></table>';
+    html+='<div style="font-size:11px;color:var(--clay);margin-top:12px">Cost without * is real (from provider). * = estimated from public pricing.</div>';
+    el.innerHTML=html;
+  }catch(e){el.innerHTML='<div class="loading">Failed to load.</div>';}
 }
 
-async function loadModels(days) {
-  var el = document.getElementById('modelsContent');
-  el.innerHTML = '<div class="loading">Loading...</div>';
-  try {
-    var r = await fetch(API + '/api/models?days=' + days);
-    var d = await r.json();
-    if (!d.ok || !d.data || d.data.length === 0) {
-      el.innerHTML = '<div class="loading">No data yet.</div>';
-      return;
+// ── Lookup ──
+function lookupFromBoard(hash){document.getElementById('lookupInput').value=hash;showTab('lookup');lookupUser();}
+async function lookupUser(){
+  var hash=document.getElementById('lookupInput').value.trim();if(!hash)return;
+  var el=document.getElementById('lookupContent');el.innerHTML='<div class="loading">Loading...</div>';
+  try{
+    var r=await fetch(API+'/api/user/'+hash);var d=await r.json();
+    if(!d.ok||!d.data||d.data.length===0){el.innerHTML='<div class="loading">No data found for this hash.</div>';return;}
+    var tt=0,tc=0,tco=0;
+    for(var i=0;i<d.data.length;i++){tt+=d.data[i].total_tokens||0;tc+=d.data[i].call_count||0;
+      var rc2=d.data[i].total_cost>0?d.data[i].total_cost:estimateCost(d.data[i].model,d.data[i].input_tokens||0,d.data[i].output_tokens||0);
+      if(rc2>0)tco+=rc2;
     }
-    var maxTokens = d.data[0].total_tokens || 1;
-    var html = '<table class="table"><tr><th>Model</th><th>Provider</th><th>Tokens</th><th>Est. Cost</th><th>Users</th><th>Calls</th><th></th></tr>';
-    for (var i = 0; i < d.data.length; i++) {
-      var row = d.data[i];
-      var pct = Math.round((row.total_tokens / maxTokens) * 100);
-      var cost = estimateCost(row.model, row.input_tokens || 0, row.output_tokens || 0);
-      html += '<tr>'
-        + '<td class="model-name">' + escapeHtml(row.model) + '</td>'
-        + '<td><span class="provider-badge">' + escapeHtml(row.provider) + '</span></td>'
-        + '<td class="tokens">' + formatNumber(row.total_tokens) + '</td>'
-        + '<td style="color:var(--orange)">' + formatCost(cost) + '</td>'
-        + '<td>' + (row.unique_users || 0) + '</td>'
-        + '<td class="calls">' + formatNumber(row.call_count) + '</td>'
-        + '<td class="bar-cell"><div class="bar-bg"><div class="bar-fill" style="width:' + pct + '%"></div></div></td>'
-        + '</tr>';
+    var html='<div class="user-card">';
+    html+='<div class="user-card-hash">'+escapeHtml(hash)+'</div>';
+    html+='<div class="user-card-stats">';
+    html+='<div class="stat"><div class="stat-value teal" style="font-size:24px">'+formatNumber(tt)+'</div><div class="stat-label">Tokens</div></div>';
+    html+='<div class="stat"><div class="stat-value" style="font-size:24px;color:var(--amber)">'+formatCost(tco)+'</div><div class="stat-label">Est. Cost</div></div>';
+    html+='<div class="stat"><div class="stat-value" style="font-size:24px">'+formatNumber(tc)+'</div><div class="stat-label">Calls</div></div>';
+    html+='<div class="stat"><div class="stat-value" style="font-size:24px">'+d.data.length+'</div><div class="stat-label">Models</div></div>';
+    html+='</div></div>';
+    html+='<table class="table"><thead><tr><th>Model</th><th>Provider</th><th>Input</th><th>Output</th><th>Est. Cost</th><th>Calls</th></tr></thead><tbody>';
+    for(var i=0;i<d.data.length;i++){
+      var row=d.data[i];var rc3=row.total_cost>0?row.total_cost:estimateCost(row.model,row.input_tokens||0,row.output_tokens||0);
+      html+='<tr style="animation-delay:'+(i*0.04)+'s">'
+        +'<td class="model-name">'+escapeHtml(row.model)+'</td>'
+        +'<td><span class="provider-badge">'+escapeHtml(row.provider)+'</span></td>'
+        +'<td>'+formatNumber(row.input_tokens)+'</td>'
+        +'<td>'+formatNumber(row.output_tokens)+'</td>'
+        +'<td class="cost">'+formatCost(rc3)+(row.total_cost>0?'':'*')+'</td>'
+        +'<td class="calls">'+formatNumber(row.call_count)+'</td></tr>';
     }
-    html += '</table>';
-    html += '<div style="font-size:11px;color:#444;margin-top:8px">* Cost estimated from public pricing. Actual billing may vary by plan.</div>';
-    el.innerHTML = html;
-  } catch(e) {
-    el.innerHTML = '<div class="loading">Failed to load.</div>';
-  }
+    html+='</tbody></table>';
+    html+='<div class="proof-section">';
+    html+='<div style="font-size:15px;font-weight:600;color:var(--charcoal);margin-bottom:14px">Store on-chain</div>';
+    html+='<div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">';
+    html+='<button class="proof-btn" onclick="storeReceipts(this,\''+escapeHtml(hash)+'\')">Store Receipts on BASE</button>';
+    html+='<button class="proof-btn proof-btn-outline" onclick="storeSummary(this,\''+escapeHtml(hash)+'\')">Store Summary on BASE</button>';
+    html+='</div>';
+    html+='<div class="proof-desc">Every API call generates a gateway-signed receipt. Store on BASE (~$0.01 gas). Anyone can verify with the gateway\'s public key.</div>';
+    html+='</div>';
+    el.innerHTML=html;
+  }catch(e){el.innerHTML='<div class="loading">Failed to load.</div>';}
 }
 
-// ── User Lookup ──
-function lookupFromBoard(hash) {
-  document.getElementById('lookupInput').value = hash;
-  showTab('lookup');
-  lookupUser();
+// ── Store on BASE ──
+async function sendToBase(btn,label,payload){
+  if(!window.ethereum){alert('Install MetaMask to store proof on-chain.');return;}
+  var orig=btn.textContent;
+  try{
+    btn.textContent='Connect wallet...';btn.disabled=true;
+    await window.ethereum.request({method:'eth_requestAccounts'});
+    var cid=await window.ethereum.request({method:'eth_chainId'});
+    if(cid!=='0x2105'){try{await window.ethereum.request({method:'wallet_switchEthereumChain',params:[{chainId:'0x2105'}]})}catch(e){alert('Switch to Base network.');btn.textContent=orig;btn.disabled=false;return;}}
+    btn.textContent='Confirm in wallet...';
+    var hex='0x'+Array.from(new TextEncoder().encode(JSON.stringify(payload))).map(function(b){return b.toString(16).padStart(2,'0')}).join('');
+    var accts=await window.ethereum.request({method:'eth_accounts'});
+    await window.ethereum.request({method:'eth_sendTransaction',params:[{from:accts[0],to:accts[0],value:'0x0',data:hex}]});
+    alert(label+' stored on BASE!');
+  }catch(e){if(e.code!==4001)alert('Error: '+e.message);}finally{btn.textContent=orig;btn.disabled=false;}
 }
-
-async function lookupUser() {
-  var hash = document.getElementById('lookupInput').value.trim();
-  if (!hash) return;
-  var el = document.getElementById('lookupContent');
-  el.innerHTML = '<div class="loading">Loading...</div>';
-  try {
-    var r = await fetch(API + '/api/user/' + hash);
-    var d = await r.json();
-    if (!d.ok || !d.data || d.data.length === 0) {
-      el.innerHTML = '<div class="loading">No data found for this hash.</div>';
-      return;
-    }
-    var totalTokens = 0, totalCalls = 0, totalCost = 0;
-    for (var i = 0; i < d.data.length; i++) {
-      totalTokens += d.data[i].total_tokens || 0;
-      totalCalls += d.data[i].call_count || 0;
-      var c = estimateCost(d.data[i].model, d.data[i].input_tokens || 0, d.data[i].output_tokens || 0);
-      if (c > 0) totalCost += c;
-    }
-    var html = '<div class="user-card">';
-    html += '<div class="user-card-hash">' + escapeHtml(hash) + '</div>';
-    html += '<div class="user-card-stats">';
-    html += '<div class="stat"><div class="stat-value accent" style="font-size:24px">' + formatNumber(totalTokens) + '</div><div class="stat-label">Total Tokens</div></div>';
-    html += '<div class="stat"><div class="stat-value" style="font-size:24px;color:var(--orange)">' + formatCost(totalCost) + '</div><div class="stat-label">Est. Cost</div></div>';
-    html += '<div class="stat"><div class="stat-value" style="font-size:24px">' + formatNumber(totalCalls) + '</div><div class="stat-label">API Calls</div></div>';
-    html += '<div class="stat"><div class="stat-value" style="font-size:24px">' + d.data.length + '</div><div class="stat-label">Models Used</div></div>';
-    html += '</div></div>';
-
-    // Per-model breakdown
-    html += '<table class="table"><tr><th>Model</th><th>Provider</th><th>Input</th><th>Output</th><th>Est. Cost</th><th>Calls</th></tr>';
-    for (var i = 0; i < d.data.length; i++) {
-      var row = d.data[i];
-      var rowCost = estimateCost(row.model, row.input_tokens || 0, row.output_tokens || 0);
-      html += '<tr>'
-        + '<td class="model-name">' + escapeHtml(row.model) + '</td>'
-        + '<td><span class="provider-badge">' + escapeHtml(row.provider) + '</span></td>'
-        + '<td>' + formatNumber(row.input_tokens) + '</td>'
-        + '<td>' + formatNumber(row.output_tokens) + '</td>'
-        + '<td style="color:var(--orange)">' + formatCost(rowCost) + '</td>'
-        + '<td class="calls">' + formatNumber(row.call_count) + '</td>'
-        + '</tr>';
-    }
-    html += '</table>';
-
-    // Proof section
-    html += '<div class="proof-section">';
-    html += '<div style="font-size:14px;color:var(--text);margin-bottom:12px">Store on-chain</div>';
-    html += '<div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">';
-    html += '<button class="proof-btn" onclick="storeReceipts(this,\'' + escapeHtml(hash) + '\')">Store Receipts on BASE</button>';
-    html += '<button class="proof-btn" style="background:var(--surface);color:var(--accent);border:1px solid var(--accent)" onclick="storeSummary(this,\'' + escapeHtml(hash) + '\')">Store Summary on BASE</button>';
-    html += '</div>';
-    html += '<div class="proof-desc">Every API call generates a gateway-signed receipt. Store individual receipts or a summary on BASE (~$0.01 gas). Anyone can verify signatures with the gateway\'s public key.</div>';
-    html += '</div>';
-
-    el.innerHTML = html;
-  } catch(e) {
-    el.innerHTML = '<div class="loading">Failed to load.</div>';
-  }
+async function storeReceipts(btn,h){
+  btn.textContent='Fetching...';btn.disabled=true;
+  try{var r=await fetch(API+'/api/user/'+h+'/receipts?limit=100');var d=await r.json();
+    if(!d.ok||!d.data||!d.data.length){alert('No receipts.');btn.textContent='Store Receipts on BASE';btn.disabled=false;return;}
+    var s=d.data.filter(function(r){return r.sig});if(!s.length){alert('No signed receipts.');btn.textContent='Store Receipts on BASE';btn.disabled=false;return;}
+    if(d.has_more&&!confirm('Only first '+s.length+' receipts will be stored. Continue?')){btn.textContent='Store Receipts on BASE';btn.disabled=false;return;}
+    await sendToBase(btn,s.length+' receipt(s)',{p:'nous',v:1,type:'receipts',user:h,count:s.length,receipts:s,gateway:API});
+  }catch(e){alert('Error: '+e.message);btn.textContent='Store Receipts on BASE';btn.disabled=false;}
 }
-
-// ── Store on BASE (shared wallet logic) ──
-async function sendToBase(btn, label, payload) {
-  if (!window.ethereum) {
-    alert('Please install MetaMask to store proof on-chain.');
-    return;
-  }
-  var origText = btn.textContent;
-  try {
-    btn.textContent = 'Connect wallet...';
-    btn.disabled = true;
-    await window.ethereum.request({ method: 'eth_requestAccounts' });
-
-    var chainId = await window.ethereum.request({ method: 'eth_chainId' });
-    if (chainId !== '0x2105') {
-      try {
-        await window.ethereum.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: '0x2105' }] });
-      } catch(e) {
-        alert('Please switch to Base network in MetaMask.');
-        btn.textContent = origText; btn.disabled = false;
-        return;
-      }
-    }
-
-    btn.textContent = 'Confirm in wallet...';
-    var hexData = '0x' + Array.from(new TextEncoder().encode(JSON.stringify(payload))).map(function(b) { return b.toString(16).padStart(2, '0'); }).join('');
-    var accounts = await window.ethereum.request({ method: 'eth_accounts' });
-    await window.ethereum.request({
-      method: 'eth_sendTransaction',
-      params: [{ from: accounts[0], to: accounts[0], value: '0x0', data: hexData }]
-    });
-
-    alert(label + ' stored on BASE! Verify signatures at ' + API + '/api/pubkey');
-  } catch(e) {
-    if (e.code !== 4001) alert('Error: ' + e.message);
-  } finally {
-    btn.textContent = origText; btn.disabled = false;
-  }
-}
-
-// Store individual signed receipts on-chain
-async function storeReceipts(btn, userHash) {
-  btn.textContent = 'Fetching receipts...';
-  btn.disabled = true;
-  try {
-    var res = await fetch(API + '/api/user/' + userHash + '/receipts?limit=100');
-    var data = await res.json();
-    if (!data.ok || !data.data || data.data.length === 0) {
-      alert('No receipts found.');
-      btn.textContent = 'Store Receipts on BASE'; btn.disabled = false;
-      return;
-    }
-    // Filter to only signed receipts
-    var signed = data.data.filter(function(r) { return r.sig; });
-    if (signed.length === 0) {
-      alert('No signed receipts available.');
-      btn.textContent = 'Store Receipts on BASE'; btn.disabled = false;
-      return;
-    }
-    if (data.has_more) {
-      if (!confirm('You have more than ' + signed.length + ' receipts. Only the first ' + signed.length + ' will be stored. Continue?')) {
-        btn.textContent = 'Store Receipts on BASE'; btn.disabled = false;
-        return;
-      }
-    }
-    await sendToBase(btn, signed.length + ' receipt(s)', {
-      p: 'nous', v: 1, type: 'receipts',
-      user: userHash,
-      count: signed.length,
-      receipts: signed,
-      gateway: API
-    });
-  } catch(e) {
-    alert('Error: ' + e.message);
-    btn.textContent = 'Store Receipts on BASE'; btn.disabled = false;
-  }
-}
-
-// Store aggregated summary on-chain
-async function storeSummary(btn, userHash) {
-  btn.textContent = 'Signing summary...';
-  btn.disabled = true;
-  try {
-    var res = await fetch(API + '/api/sign', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_hash: userHash })
-    });
-    var data = await res.json();
-    if (!data.ok) {
-      alert('Signing failed: ' + (data.error || 'unknown'));
-      btn.textContent = 'Store Summary on BASE'; btn.disabled = false;
-      return;
-    }
-    await sendToBase(btn, 'Summary', {
-      proof: data.proof,
-      sig: data.signature,
-      gateway: API
-    });
-  } catch(e) {
-    alert('Error: ' + e.message);
-    btn.textContent = 'Store Summary on BASE'; btn.disabled = false;
-  }
+async function storeSummary(btn,h){
+  btn.textContent='Signing...';btn.disabled=true;
+  try{var r=await fetch(API+'/api/sign',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_hash:h})});var d=await r.json();
+    if(!d.ok){alert('Failed: '+(d.error||''));btn.textContent='Store Summary on BASE';btn.disabled=false;return;}
+    await sendToBase(btn,'Summary',{proof:d.proof,sig:d.signature,gateway:API});
+  }catch(e){alert('Error: '+e.message);btn.textContent='Store Summary on BASE';btn.disabled=false;}
 }
 
 // ── Claim ──
-async function verifyClaim() {
-  var code = document.getElementById('claimInput').value.trim();
-  if (!code || !/^\d{6}$/.test(code)) {
-    document.getElementById('claimResult').innerHTML = '<div style="color:var(--orange)">Enter a 6-digit code.</div>';
-    return;
-  }
-  var el = document.getElementById('claimResult');
-  el.innerHTML = '<div style="color:var(--muted)">Verifying...</div>';
-  try {
-    var r = await fetch(API + '/api/claim/verify', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code: code })
-    });
-    var d = await r.json();
-    if (!d.ok || !d.user_hash) {
-      el.innerHTML = '<div style="color:#f87171">' + escapeHtml(d.error || 'Invalid or expired code') + '</div>';
-      return;
-    }
-    el.innerHTML = '<div style="color:var(--accent);font-size:15px;font-weight:600">Claimed!</div>'
-      + '<div style="font-family:monospace;font-size:14px;color:var(--accent);margin:8px 0;word-break:break-all">' + escapeHtml(d.user_hash) + '</div>'
-      + '<div style="margin-top:12px"><button class="proof-btn" onclick="lookupFromBoard(\'' + escapeHtml(d.user_hash) + '\')">View my usage & store on-chain</button></div>';
-  } catch(e) {
-    el.innerHTML = '<div style="color:#f87171">Failed to verify. Try again.</div>';
-  }
+async function verifyClaim(){
+  var code=document.getElementById('claimInput').value.trim();
+  if(!code||!/^\d{6}$/.test(code)){document.getElementById('claimResult').innerHTML='<div style="color:var(--amber)">Enter a 6-digit code.</div>';return;}
+  var el=document.getElementById('claimResult');el.innerHTML='<div style="color:var(--sage)">Verifying...</div>';
+  try{
+    var r=await fetch(API+'/api/claim/verify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:code})});var d=await r.json();
+    if(!d.ok||!d.user_hash){el.innerHTML='<div style="color:#c0392b">'+escapeHtml(d.error||'Invalid or expired code')+'</div>';return;}
+    el.innerHTML='<div style="color:var(--teal);font-size:16px;font-weight:600;margin-bottom:8px">Claimed!</div>'
+      +'<div style="font-family:monospace;font-size:13px;color:var(--teal);word-break:break-all">'+escapeHtml(d.user_hash)+'</div>'
+      +'<div style="margin-top:16px"><button class="proof-btn" onclick="lookupFromBoard(\''+escapeHtml(d.user_hash)+'\')">View my usage</button></div>';
+  }catch(e){el.innerHTML='<div style="color:#c0392b">Failed to verify.</div>';}
 }
 
 // ── Helpers ──
-function formatNumber(n) {
-  if (n == null) return '0';
-  n = parseInt(n);
-  if (n >= 1e12) return (n / 1e12).toFixed(1) + 'T';
-  if (n >= 1e9) return (n / 1e9).toFixed(1) + 'B';
-  if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
-  if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
-  return n.toString();
-}
+function formatNumber(n){if(n==null)return'0';n=parseInt(n);if(n>=1e12)return(n/1e12).toFixed(1)+'T';if(n>=1e9)return(n/1e9).toFixed(1)+'B';if(n>=1e6)return(n/1e6).toFixed(1)+'M';if(n>=1e3)return(n/1e3).toFixed(1)+'K';return n.toString();}
+function escapeHtml(s){var d=document.createElement('div');d.appendChild(document.createTextNode(s));return d.innerHTML;}
 
-function escapeHtml(s) {
-  var d = document.createElement('div');
-  d.appendChild(document.createTextNode(s));
-  return d.innerHTML;
-}
-
-// ── Init ──
+// ── Init + Auto-refresh ──
 loadStats();
 loadLeaderboard(30);
+setInterval(loadStats, 30000);
 </script>
 </body>
 </html>

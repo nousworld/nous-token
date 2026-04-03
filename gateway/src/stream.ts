@@ -133,6 +133,7 @@ function extractUsageFromSSE(
             cacheReadTokens: cacheRead,
             cacheWriteTokens: cacheWrite,
             totalTokens: inputTokens + outputTokens,
+            cost: 0,
           };
         }
       }

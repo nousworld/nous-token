@@ -48,7 +48,8 @@ export async function initDB(db: D1Database): Promise<void> {
       total_tokens INTEGER NOT NULL,
       endpoint TEXT NOT NULL,
       leaf_hash TEXT NOT NULL DEFAULT '',
-      receipt_sig TEXT NOT NULL DEFAULT ''
+      receipt_sig TEXT NOT NULL DEFAULT '',
+      cost REAL NOT NULL DEFAULT 0
     )`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_usage_user ON usage_records(user_hash)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_usage_time ON usage_records(timestamp)`),
@@ -66,6 +67,8 @@ export async function initDB(db: D1Database): Promise<void> {
       expires_at TEXT NOT NULL
     )`),
   ]);
+  // Migration: add cost column for existing databases
+  try { await db.exec(`ALTER TABLE usage_records ADD COLUMN cost REAL NOT NULL DEFAULT 0`); } catch { /* exists */ }
 }
 
 export async function recordUsage(
@@ -104,11 +107,11 @@ export async function recordUsage(
       .join("");
   }
 
-  // Insert record with receipt signature
+  // Insert record with receipt signature and real cost
   const result = await db
     .prepare(
-      `INSERT INTO usage_records (timestamp, user_hash, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, total_tokens, endpoint, leaf_hash, receipt_sig)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO usage_records (timestamp, user_hash, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, total_tokens, endpoint, leaf_hash, receipt_sig, cost)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .bind(
       timestamp,
@@ -122,7 +125,8 @@ export async function recordUsage(
       usage.totalTokens,
       endpoint,
       leafHash,
-      receiptSig
+      receiptSig,
+      usage.cost
     )
     .run();
 

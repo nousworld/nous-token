@@ -220,11 +220,36 @@ async function handleAPI(request: Request, url: URL, env: Env): Promise<Response
               SUM(total_tokens) as total_tokens,
               SUM(input_tokens) as input_tokens,
               SUM(output_tokens) as output_tokens,
+              SUM(cost) as total_cost,
               COUNT(*) as call_count
        FROM usage_records
        WHERE timestamp > ?
        GROUP BY user_hash
        ORDER BY total_tokens DESC
+       LIMIT ?`
+    ).bind(since, limit).all();
+
+    return json({ ok: true, data: rows.results, period_days: days });
+  }
+
+  // GET /api/leaderboard/cost — top API users by real cost (only users with provider-reported cost)
+  if (url.pathname === "/api/leaderboard/cost") {
+    const days = parseInt(url.searchParams.get("days") || "30");
+    const limit = Math.min(parseInt(url.searchParams.get("limit") || "100"), 500);
+    const since = new Date(Date.now() - days * 86400000).toISOString();
+
+    const rows = await env.DB.prepare(
+      `SELECT user_hash,
+              SUM(total_tokens) as total_tokens,
+              SUM(input_tokens) as input_tokens,
+              SUM(output_tokens) as output_tokens,
+              SUM(cost) as total_cost,
+              COUNT(*) as call_count
+       FROM usage_records
+       WHERE timestamp > ? AND cost > 0
+       GROUP BY user_hash
+       HAVING SUM(cost) > 0
+       ORDER BY SUM(cost) DESC
        LIMIT ?`
     ).bind(since, limit).all();
 
@@ -241,6 +266,7 @@ async function handleAPI(request: Request, url: URL, env: Env): Promise<Response
               SUM(total_tokens) as total_tokens,
               SUM(input_tokens) as input_tokens,
               SUM(output_tokens) as output_tokens,
+              SUM(cost) as total_cost,
               COUNT(*) as call_count,
               COUNT(DISTINCT user_hash) as unique_users
        FROM usage_records
@@ -274,6 +300,7 @@ async function handleAPI(request: Request, url: URL, env: Env): Promise<Response
               SUM(total_tokens) as total_tokens,
               SUM(input_tokens) as input_tokens,
               SUM(output_tokens) as output_tokens,
+              SUM(cost) as total_cost,
               COUNT(*) as call_count
        FROM usage_records
        WHERE user_hash = ?
