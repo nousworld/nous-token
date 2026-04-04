@@ -24,8 +24,8 @@ function saveWallet(wallet: string): void {
   writeFileSync(NOUS_CONFIG, wallet);
 }
 
-function gatewayUrl(path: string, wallet: string): string {
-  return wallet ? `${GATEWAY}${path}/w/${wallet}` : `${GATEWAY}${path}`;
+function gatewayUrl(provider: string, apiPath: string, wallet: string): string {
+  return wallet ? `${GATEWAY}/${provider}/w/${wallet}${apiPath}` : `${GATEWAY}/${provider}${apiPath}`;
 }
 
 interface Tool {
@@ -67,7 +67,7 @@ const tools: Tool[] = [
       try { execSync("which claude", { stdio: "ignore" }); return true; } catch { return false; }
     },
     configure: (wallet: string) => {
-      return setShellEnv("ANTHROPIC_BASE_URL", gatewayUrl("/anthropic", wallet), "Claude Code");
+      return setShellEnv("ANTHROPIC_BASE_URL", gatewayUrl("anthropic", "", wallet), "Claude Code");
     },
   },
 
@@ -94,7 +94,7 @@ const tools: Tool[] = [
             if (content["openai.baseUrl"]?.includes("nousai")) {
               return { success: true, message: "already configured" };
             }
-            content["openai.baseUrl"] = gatewayUrl("/openai/v1", wallet);
+            content["openai.baseUrl"] = gatewayUrl("openai", "/v1", wallet);
             writeFileSync(sp, JSON.stringify(content, null, 2));
             return { success: true, message: `set baseUrl in Cursor settings` };
           } catch {
@@ -114,7 +114,7 @@ const tools: Tool[] = [
         (() => { try { execSync("which codex", { stdio: "ignore" }); return true; } catch { return false; } })();
     },
     configure: (wallet: string) => {
-      return setShellEnv("OPENAI_BASE_URL", gatewayUrl("/openai/v1", wallet), "Codex");
+      return setShellEnv("OPENAI_BASE_URL", gatewayUrl("openai", "/v1", wallet), "Codex");
     },
   },
 
@@ -126,7 +126,7 @@ const tools: Tool[] = [
         (() => { try { execSync("which gemini", { stdio: "ignore" }); return true; } catch { return false; } })();
     },
     configure: (wallet: string) => {
-      return setShellEnv("GOOGLE_GEMINI_BASE_URL", gatewayUrl("/gemini", wallet), "Gemini CLI");
+      return setShellEnv("GOOGLE_GEMINI_BASE_URL", gatewayUrl("gemini", "", wallet), "Gemini CLI");
     },
   },
 
@@ -137,7 +137,7 @@ const tools: Tool[] = [
       try { execSync("python3 -c 'import openai'", { stdio: "ignore" }); return true; } catch { return false; }
     },
     configure: (wallet: string) => {
-      return setShellEnv("OPENAI_BASE_URL", gatewayUrl("/openai/v1", wallet), "Python openai SDK");
+      return setShellEnv("OPENAI_BASE_URL", gatewayUrl("openai", "/v1", wallet), "Python openai SDK");
     },
   },
 
@@ -148,7 +148,7 @@ const tools: Tool[] = [
       try { execSync("python3 -c 'import anthropic'", { stdio: "ignore" }); return true; } catch { return false; }
     },
     configure: (wallet: string) => {
-      return setShellEnv("ANTHROPIC_BASE_URL", gatewayUrl("/anthropic", wallet), "Python anthropic SDK");
+      return setShellEnv("ANTHROPIC_BASE_URL", gatewayUrl("anthropic", "", wallet), "Python anthropic SDK");
     },
   },
 ];
