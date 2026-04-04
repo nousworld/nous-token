@@ -79,11 +79,11 @@ Users identify themselves with an Ethereum wallet address. The wallet is the per
 
 ### How it works
 
-1. User runs `npx nous-token setup`, enters wallet address + API key
-2. CLI computes `user_hash = SHA-256(api_key)[0:16]` locally, sends `{api_key, wallet}` to `/api/link`
-3. Gateway computes the same hash, verifies it exists in records, links all records to the wallet
-4. Future API calls include `?wallet=0x...` in the base URL (set by CLI) or `X-Nous-Wallet` header (set by plugin)
-5. Gateway stores wallet with each new record and backfills old records for the same hash
+1. User runs `npx nous-token setup`, enters wallet address
+2. CLI configures AI tools with base URL: `https://gateway.nousai.cc/{provider}/w/{wallet}/...`
+3. First API call through the gateway: gateway hashes the auth token, records usage with wallet
+4. Wallet binding is automatic — no separate linking step, no API key transmission
+5. Old records for the same auth token hash are backfilled to the wallet
 
 ### Binding rules
 
@@ -161,7 +161,6 @@ Both options use self-to-self transactions with data as calldata. No smart contr
 | `/api/wallet/{address}` | GET | Usage for a wallet (all linked hashes aggregated) |
 | `/api/user/{hash}` | GET | Single user aggregated stats |
 | `/api/user/{hash}/receipts` | GET | Signed receipts (paginated) |
-| `/api/link` | POST | Link hash to wallet (`{api_key, wallet}`) — first bind wins |
 | `/api/records` | GET | Raw records for sentinel verification |
 | `/api/chain` | GET | Merkle root and MMR state |
 | `/api/sign` | POST | Signed summary (optional aggregation) |

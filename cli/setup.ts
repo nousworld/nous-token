@@ -7,11 +7,10 @@
 // Scans for installed AI tools, configures them to route through
 // the nous-token gateway for usage tracking.
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync, appendFileSync } from "fs";
+import { existsSync, readFileSync, writeFileSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
 import { execSync } from "child_process";
-import { createHash } from "crypto";
 
 const GATEWAY = "https://gateway.nousai.cc";
 const HOME = homedir();
@@ -26,7 +25,7 @@ function saveWallet(wallet: string): void {
 }
 
 function gatewayUrl(path: string, wallet: string): string {
-  return wallet ? `${GATEWAY}${path}?wallet=${wallet}` : `${GATEWAY}${path}`;
+  return wallet ? `${GATEWAY}${path}/w/${wallet}` : `${GATEWAY}${path}`;
 }
 
 interface Tool {
@@ -181,27 +180,6 @@ function setShellEnv(key: string, value: string, toolName: string): ConfigResult
   return { success: true, message: `set ${key} in ${rcName}` };
 }
 
-// ── Find first available API key ──
-
-function findFirstApiKey(): string | null {
-  const keys = [
-    process.env.OPENAI_API_KEY,
-    process.env.ANTHROPIC_API_KEY,
-    process.env.DEEPSEEK_API_KEY,
-    process.env.GEMINI_API_KEY,
-    process.env.GROQ_API_KEY,
-  ];
-  for (const key of keys) {
-    if (key) return key.replace(/^Bearer\s+/i, "");
-  }
-  return null;
-}
-
-function computeUserHash(): string | null {
-  const key = findFirstApiKey();
-  if (!key) return null;
-  return createHash("sha256").update(key).digest("hex").slice(0, 32);
-}
 
 // ── Prompt helper ──
 
@@ -242,39 +220,7 @@ if (wallet) {
   process.exit(0);
 }
 
-// Step 2: API key — read from env or ask
-let apiKey = findFirstApiKey();
-if (!apiKey) {
-  const input = await ask("  API key (sk-...): ");
-  if (input) {
-    apiKey = input.replace(/^Bearer\s+/i, "");
-  }
-}
-
-// Step 3: Link hash → wallet via gateway
-if (apiKey) {
-  const hash = createHash("sha256").update(apiKey).digest("hex").slice(0, 32);
-  console.log(`  \x1b[90mUser hash: ${hash}\x1b[0m`);
-  try {
-    const res = await fetch(`${GATEWAY}/api/link`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ api_key: apiKey, wallet }),
-    });
-    const data = await res.json() as { ok?: boolean; error?: string };
-    if (data.ok) {
-      console.log(`  \x1b[32m✓ Linked to wallet\x1b[0m\n`);
-    } else {
-      console.log(`  \x1b[90m${data.error || "No existing records to link — they'll link automatically on first use."}\x1b[0m\n`);
-    }
-  } catch {
-    console.log("  \x1b[90mCouldn't reach gateway — linking will happen on first use.\x1b[0m\n");
-  }
-} else {
-  console.log("  \x1b[90mNo API key found. Wallet will link on first use through the gateway.\x1b[0m\n");
-}
-
-// Step 4: Configure tools
+// Step 2: Configure tools
 console.log("  Scanning for AI tools...\n");
 
 let configured = 0;

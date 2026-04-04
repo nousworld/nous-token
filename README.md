@@ -12,11 +12,9 @@ One command to track all your AI spending across every provider. Your data is si
 npx nous-token setup
 ```
 
-The CLI asks two things:
-1. **Wallet address** (0x...) — your permanent identity across API keys
-2. **API key** — used locally to compute your hash, never sent anywhere
+The CLI asks one thing: your **wallet address** (0x...) — your permanent identity.
 
-Then it auto-detects your AI tools (Claude Code, Cursor, Python SDKs, etc.) and routes them through the gateway.
+Then it auto-detects your AI tools (Claude Code, Cursor, Python SDKs, etc.) and routes them through the gateway. Works with both API keys and subscription plans (Claude Max, etc.).
 
 ## How It Works
 
@@ -56,9 +54,10 @@ Works with any OpenAI-compatible API out of the box:
 Your wallet address is your permanent identity. API keys expire and rotate — your wallet doesn't.
 
 - Run `npx nous-token setup` with your wallet address
-- All usage across any API key links to your wallet
-- Switch keys, switch machines — your history follows you
-- First bind is permanent (prevents rebind with leaked keys)
+- All usage across any API key or OAuth token links to your wallet
+- Switch keys, switch machines, switch plans — your history follows you
+- First bind is permanent per auth token (prevents rebind with leaked keys)
+- Works with API keys and subscription plans (Claude Max, ChatGPT Plus, etc.)
 
 ## Privacy by Structure
 
@@ -66,7 +65,7 @@ Not by promise — by code. [Audit the source](gateway/src/index.ts).
 
 | Data | What happens |
 |------|-------------|
-| API Key | Hashed (SHA-256) for identity. Never stored. |
+| Auth Token | Hashed (SHA-256) for identity. Never stored. Works with API keys and OAuth tokens. |
 | Prompts | `request.body` piped directly to provider. Never read. |
 | Responses (streaming) | Tee'd. Only last 4KB buffered to extract `.usage`. |
 | Responses (non-streaming) | In V8 isolate memory. Only `.usage` accessed. GC'd after request. |
@@ -107,7 +106,6 @@ Gateway: `https://gateway.nousai.cc`
 | `/api/wallet/{address}` | GET | Usage for a wallet (all linked hashes) |
 | `/api/user/{hash}` | GET | Single user stats |
 | `/api/user/{hash}/receipts` | GET | Signed receipts (paginated) |
-| `/api/link` | POST | Link hash to wallet (`{api_key, wallet}`) |
 | `/api/records` | GET | Raw records for sentinel verification |
 | `/api/chain` | GET | Merkle root and MMR state |
 | `/api/sign` | POST | Signed summary for on-chain storage |

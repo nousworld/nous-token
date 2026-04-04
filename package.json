@@ -1,6 +1,6 @@
 {
   "name": "nous-token",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Open-source AI usage tracker. One command to track all your AI spending.",
   "type": "module",
   "main": "index.ts",

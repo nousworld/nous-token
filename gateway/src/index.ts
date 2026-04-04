@@ -72,13 +72,18 @@ export default {
 
     // ── Proxy Logic ──
 
+    // Wallet identity: from header, query param, or path segment (/provider/w/0x.../)
+    // Path segment is needed because ANTHROPIC_BASE_URL can't have query params (SDK breaks them)
+    let walletFromPath = "";
+    const walletHeader = (request.headers.get("x-nous-wallet") || "").toLowerCase();
+    const walletQuery = (url.searchParams.get("wallet") || "").toLowerCase();
+    // Path wallet extracted during routing below
+
     // User identity: prefer X-Nous-User header (plugin pre-computes hash).
-    // Fallback: compute hash from API key in Authorization header.
-    // This supports tools like Claude Code that can set base URL but not custom headers.
-    // The API key is ONLY used for hashing — never stored, logged, or forwarded differently.
+    // Fallback: compute hash from API key / OAuth token in Authorization header.
+    // Any bearer token works — API key, OAuth token, etc.
     let userHash = request.headers.get("x-nous-user");
     if (!userHash || !/^[a-f0-9]{32}$/.test(userHash)) {
-      // Try to compute from API key
       const authHeader = request.headers.get("authorization")
         || request.headers.get("x-api-key")
         || request.headers.get("x-goog-api-key")  // Gemini
@@ -104,7 +109,13 @@ export default {
       // Known shortcut: /openai/v1/chat/completions → api.openai.com/v1/chat/completions
       upstreamBase = shortcutUpstream;
       providerName = firstSegment;
-      apiPath = "/" + parts.slice(2).join("/");
+      // Check for wallet in path: /provider/w/0x.../rest/of/path
+      let restParts = parts.slice(2);
+      if (restParts[0] === "w" && restParts[1] && /^0x[a-f0-9]{40}$/i.test(restParts[1])) {
+        walletFromPath = restParts[1].toLowerCase();
+        restParts = restParts.slice(2);
+      }
+      apiPath = "/" + restParts.join("/");
     } else if (customUpstream) {
       // Custom upstream via header: any URL
       try {
@@ -151,8 +162,8 @@ export default {
     for (const [k, v] of Object.entries(corsHeaders())) {
       responseHeaders.set(k, v);
     }
-    // Wallet identity: from header (plugin) or query param (base URL tools like Claude Code)
-    const walletRaw = (request.headers.get("x-nous-wallet") || url.searchParams.get("wallet") || "").toLowerCase();
+    // Resolve wallet from header, query, or path (in priority order)
+    const walletRaw = walletHeader || walletQuery || walletFromPath;
     const validWallet = /^0x[a-f0-9]{40}$/.test(walletRaw) ? walletRaw : "";
 
     // Tell the user their hash — so they can find themselves on the leaderboard
@@ -519,48 +530,6 @@ async function handleAPI(request: Request, url: URL, env: Env): Promise<Response
       return json({ ok: true, algorithm: "ECDSA-P256-SHA256", pubkey });
     } catch {
       return json({ error: "Key error" }, 500);
-    }
-  }
-
-
-  // POST /api/link — link a user_hash to a wallet address
-  // Sends API key to prove ownership, gateway computes hash and binds wallet.
-  if (url.pathname === "/api/link" && request.method === "POST") {
-    try {
-      const body = await request.json() as { api_key?: string; wallet?: string };
-      const apiKey = body.api_key?.trim();
-      const wallet = body.wallet?.trim().toLowerCase();
-
-      if (!apiKey) return json({ error: "api_key required" }, 400);
-      if (!wallet || !/^0x[a-f0-9]{40}$/.test(wallet)) return json({ error: "Invalid wallet address" }, 400);
-
-      const hash = await sha256Short(apiKey.replace(/^Bearer\s+/i, ""));
-
-      // Check this hash exists
-      const exists = await env.DB.prepare(
-        `SELECT 1 FROM usage_records WHERE user_hash = ? LIMIT 1`
-      ).bind(hash).first();
-      if (!exists) {
-        return json({ error: "No usage records for this API key. Use the gateway first." }, 404);
-      }
-
-      // Lock: check if already bound to a different wallet
-      const existing = await env.DB.prepare(
-        `SELECT wallet FROM usage_records WHERE user_hash = ? AND wallet != '' LIMIT 1`
-      ).bind(hash).first<{ wallet: string }>();
-
-      if (existing && existing.wallet !== wallet) {
-        return json({ error: "This hash is already linked to another wallet." }, 409);
-      }
-
-      // Link all records to wallet
-      await env.DB.prepare(
-        `UPDATE usage_records SET wallet = ? WHERE user_hash = ?`
-      ).bind(wallet, hash).run();
-
-      return json({ ok: true, user_hash: hash, wallet });
-    } catch {
-      return json({ error: "Invalid request" }, 400);
     }
   }
 

@@ -108,7 +108,18 @@ export async function recordUsage(
       .join("");
   }
 
-  // Insert record with receipt signature and real cost
+  // Resolve wallet: if this hash is already bound, use the bound wallet (first bind wins)
+  let resolvedWallet = wallet || "";
+  const existing = await db.prepare(
+    `SELECT wallet FROM usage_records WHERE user_hash = ? AND wallet != '' LIMIT 1`
+  ).bind(userHash).first<{ wallet: string }>();
+
+  if (existing) {
+    // Hash already bound — always use the bound wallet, ignore request wallet
+    resolvedWallet = existing.wallet;
+  }
+
+  // Insert record with the resolved wallet
   const result = await db
     .prepare(
       `INSERT INTO usage_records (timestamp, user_hash, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, total_tokens, endpoint, leaf_hash, receipt_sig, cost, wallet)
@@ -128,23 +139,15 @@ export async function recordUsage(
       leafHash,
       receiptSig,
       usage.cost,
-      wallet || ""
+      resolvedWallet
     )
     .run();
 
-  // Backfill: if this user_hash has old records without wallet, link them now
-  // Lock: only bind if no other wallet has claimed this hash
-  if (wallet) {
-    const existing = await db.prepare(
-      `SELECT wallet FROM usage_records WHERE user_hash = ? AND wallet != '' LIMIT 1`
-    ).bind(userHash).first<{ wallet: string }>();
-
-    if (!existing || existing.wallet === wallet) {
-      await db.prepare(
-        `UPDATE usage_records SET wallet = ? WHERE user_hash = ? AND wallet = ''`
-      ).bind(wallet, userHash).run();
-    }
-    // If existing wallet is different, ignore — first bind wins
+  // Backfill: if this is the first wallet binding, update old records without wallet
+  if (resolvedWallet && !existing) {
+    await db.prepare(
+      `UPDATE usage_records SET wallet = ? WHERE user_hash = ? AND wallet = ''`
+    ).bind(resolvedWallet, userHash).run();
   }
 
   // Update MMR
