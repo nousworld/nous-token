@@ -43,6 +43,13 @@ nav { border-bottom:1px solid var(--silk); background:var(--parchment); position
 .wallet-btn.connected { background:var(--teal-w); border-color:var(--teal); color:var(--teal); cursor:default; }
 .wallet-btn.connected:hover { background:var(--teal-w); color:var(--teal); }
 
+/* Modal */
+.modal-overlay { display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.3); z-index:200; align-items:center; justify-content:center; }
+.modal-overlay.active { display:flex; }
+.modal { background:var(--white); border-radius:var(--radius); padding:32px; max-width:400px; width:90%; box-shadow:0 20px 60px rgba(0,0,0,0.15); }
+.modal-title { font-size:16px; font-weight:600; margin-bottom:16px; color:var(--charcoal); }
+.modal-close { float:right; background:none; border:none; font-size:18px; color:var(--sage); cursor:pointer; padding:0; line-height:1; }
+
 /* Hero — pulse canvas + stats */
 .hero { position:relative; padding:64px 40px 48px; text-align:center; overflow:hidden; }
 .hero canvas { position:absolute; top:0; left:0; width:100%; height:100%; opacity:0.4; pointer-events:none; }
@@ -237,6 +244,16 @@ footer a:hover { text-decoration:underline; }
         </div>
       </div>
     </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="walletModal" onclick="if(event.target===this)closeModal()">
+  <div class="modal">
+    <button class="modal-close" onclick="closeModal()">&times;</button>
+    <div class="modal-title">Connect wallet</div>
+    <div style="font-size:13px;color:var(--sage);margin-bottom:20px">Enter your Ethereum wallet address to track your rank on the leaderboard.</div>
+    <input class="search-input" id="modalWalletInput" placeholder="0x..." style="font-size:14px;margin-bottom:16px" onkeydown="if(event.key==='Enter')submitModal()">
+    <button class="proof-btn" style="width:100%" onclick="submitModal()">Connect</button>
   </div>
 </div>
 
@@ -519,11 +536,7 @@ async function connectWallet(){
     return;
   }
   if(!window.ethereum){
-    // No MetaMask — fallback to manual input
-    var input=prompt('Enter your wallet address (0x...):');
-    if(input&&isWallet(input.trim().toLowerCase())){
-      setWallet(input.trim().toLowerCase());
-    }
+    openModal();
     return;
   }
   try{
@@ -553,6 +566,14 @@ function updateWalletBtn(){
 }
 
 function isMyRow(id){return myWallet&&id.toLowerCase()===myWallet;}
+
+function openModal(){document.getElementById('walletModal').classList.add('active');document.getElementById('modalWalletInput').focus();}
+function closeModal(){document.getElementById('walletModal').classList.remove('active');document.getElementById('modalWalletInput').value='';}
+function submitModal(){
+  var v=document.getElementById('modalWalletInput').value.trim().toLowerCase();
+  if(isWallet(v)){setWallet(v);closeModal();}
+  else{document.getElementById('modalWalletInput').style.borderColor='var(--amber)';setTimeout(function(){document.getElementById('modalWalletInput').style.borderColor='';},1500);}
+}
 
 updateWalletBtn();
 
