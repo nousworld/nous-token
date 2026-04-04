@@ -258,3 +258,4 @@ if (configured > 0) {
 }
 
 console.log("");
+process.exit(0);
