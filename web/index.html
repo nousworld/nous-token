@@ -551,7 +551,9 @@ async function connectWallet(){
   // If MetaMask available, always try it (even if already connected — lets user switch wallet)
   if(window.ethereum){
     try{
-      var accounts=await window.ethereum.request({method:'eth_requestAccounts'});
+      // Force MetaMask to show account picker every time
+      await window.ethereum.request({method:'wallet_requestPermissions',params:[{eth_accounts:{}}]});
+      var accounts=await window.ethereum.request({method:'eth_accounts'});
       if(accounts&&accounts[0]){
         setWallet(accounts[0].toLowerCase());
         lookupFromBoard(accounts[0].toLowerCase());
