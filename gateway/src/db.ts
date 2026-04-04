@@ -16,6 +16,10 @@
 
 import type { UsageData } from "./providers";
 
+// Isolate-level cache: hash → wallet. Avoids a SELECT on every request.
+// Cleared when Cloudflare recycles the isolate (minutes to hours). Cache miss = one DB read.
+const walletCache = new Map<string, string>();
+
 export interface Env {
   DB: D1Database;
   SIGNING_KEY?: string;
@@ -110,13 +114,23 @@ export async function recordUsage(
 
   // Resolve wallet: if this hash is already bound, use the bound wallet (first bind wins)
   let resolvedWallet = wallet || "";
-  const existing = await db.prepare(
-    `SELECT wallet FROM usage_records WHERE user_hash = ? AND wallet != '' LIMIT 1`
-  ).bind(userHash).first<{ wallet: string }>();
+  const cached = walletCache.get(userHash);
 
-  if (existing) {
-    // Hash already bound — always use the bound wallet, ignore request wallet
-    resolvedWallet = existing.wallet;
+  if (cached !== undefined) {
+    // Cache hit — use cached wallet (empty string means "no wallet bound yet")
+    if (cached) resolvedWallet = cached;
+  } else {
+    // Cache miss — query DB
+    const existing = await db.prepare(
+      `SELECT wallet FROM usage_records WHERE user_hash = ? AND wallet != '' LIMIT 1`
+    ).bind(userHash).first<{ wallet: string }>();
+
+    if (existing) {
+      resolvedWallet = existing.wallet;
+      walletCache.set(userHash, existing.wallet);
+    } else {
+      walletCache.set(userHash, "");
+    }
   }
 
   // Insert record with the resolved wallet
@@ -143,8 +157,9 @@ export async function recordUsage(
     )
     .run();
 
-  // Backfill: if this is the first wallet binding, update old records without wallet
-  if (resolvedWallet && !existing) {
+  // Backfill: if this is the first wallet binding, update old records and update cache
+  if (resolvedWallet && !cached) {
+    walletCache.set(userHash, resolvedWallet);
     await db.prepare(
       `UPDATE usage_records SET wallet = ? WHERE user_hash = ? AND wallet = ''`
     ).bind(resolvedWallet, userHash).run();
