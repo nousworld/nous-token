@@ -38,6 +38,10 @@ nav { border-bottom:1px solid var(--silk); background:var(--parchment); position
 .nav-links { display:flex; gap:24px; align-items:center; font-size:13px; }
 .nav-links a { color:var(--sage); text-decoration:none; transition:color .2s; }
 .nav-links a:hover { color:var(--charcoal); text-decoration:none; }
+.wallet-btn { padding:6px 16px; border-radius:20px; border:1px solid var(--teal); background:transparent; color:var(--teal); font-size:12px; font-weight:600; font-family:inherit; cursor:pointer; transition:all .15s; }
+.wallet-btn:hover { background:var(--teal); color:var(--white); }
+.wallet-btn.connected { background:var(--teal-w); border-color:var(--teal); color:var(--teal); cursor:default; }
+.wallet-btn.connected:hover { background:var(--teal-w); color:var(--teal); }
 
 /* Hero — pulse canvas + stats */
 .hero { position:relative; padding:64px 40px 48px; text-align:center; overflow:hidden; }
@@ -76,6 +80,8 @@ nav { border-bottom:1px solid var(--silk); background:var(--parchment); position
 .rank-3 { color:var(--teal); }
 .user-hash { font-family:'SF Mono','Fira Code',monospace; font-size:12px; color:var(--sage); }
 .wallet-addr { color:var(--teal); }
+.my-row { background:var(--teal-w); }
+.my-row td:first-child { border-left:3px solid var(--teal); }
 .tokens { font-weight:600; color:var(--charcoal); }
 .calls { color:var(--sage); }
 .model-name { font-weight:600; }
@@ -145,6 +151,7 @@ footer a:hover { text-decoration:underline; }
     <div class="nav-links">
       <a href="https://github.com/nousworld/nous-token" target="_blank">GitHub</a>
       <a href="https://github.com/nousworld/nous-token/blob/main/PROTOCOL.md" target="_blank">Protocol</a>
+      <button class="wallet-btn" id="walletBtn" onclick="connectWallet()">Connect</button>
     </div>
   </div>
 </nav>
@@ -338,20 +345,23 @@ async function loadLeaderboard(days){
       el.innerHTML='<div class="loading">No data yet. Be the first.</div>';
       return;
     }
-    var max=d.data[0].total_tokens||1;
+    var max=d.data[0].total_tokens||1;var myRank=0;
     var html='<table class="table"><thead><tr><th>#</th><th>User</th><th>Tokens</th><th>Calls</th><th></th></tr></thead><tbody>';
     for(var i=0;i<d.data.length;i++){
       var row=d.data[i];var rc=i<3?' rank-'+(i+1):'';var id=row.identity||row.user_hash;
-      var pct=Math.round((row.total_tokens/max)*100);
-      html+='<tr onclick="lookupFromBoard(\''+escapeHtml(id)+'\')" style="cursor:pointer;animation-delay:'+(i*0.04)+'s">'
+      var pct=Math.round((row.total_tokens/max)*100);var mine=isMyRow(id);
+      if(mine)myRank=i+1;
+      html+='<tr onclick="lookupFromBoard(\''+escapeHtml(id)+'\')" class="'+(mine?'my-row':'')+'" style="cursor:pointer;animation-delay:'+(i*0.04)+'s">'
         +'<td class="rank'+rc+'">'+(i+1)+'</td>'
-        +'<td class="'+identityClass(id)+'" title="'+escapeHtml(id)+'">'+escapeHtml(formatIdentity(id))+'</td>'
+        +'<td class="'+identityClass(id)+'" title="'+escapeHtml(id)+'">'+escapeHtml(formatIdentity(id))+(mine?' (you)':'')+'</td>'
         +'<td class="tokens">'+formatNumber(row.total_tokens)+'</td>'
         +'<td class="calls">'+formatNumber(row.call_count)+'</td>'
         +'<td class="bar-cell"><div class="bar-bg"><div class="bar-fill" style="width:'+pct+'%"></div></div></td>'
         +'</tr>';
     }
     html+='</tbody></table>';
+    if(myWallet&&myRank)html+='<div style="font-size:12px;color:var(--teal);margin-top:12px;font-weight:500">Your rank: #'+myRank+'</div>';
+    else if(myWallet&&!myRank)html+='<div style="font-size:12px;color:var(--sage);margin-top:12px">Your wallet is not in the top 100 yet.</div>';
     el.innerHTML=html;
   }catch(e){el.innerHTML='<div class="loading">Failed to load.</div>';}
 }
@@ -498,6 +508,53 @@ function escapeHtml(s){var d=document.createElement('div');d.appendChild(documen
 function isWallet(s){return/^0x[a-f0-9]{40}$/i.test(s);}
 function formatIdentity(id){if(isWallet(id))return id.slice(0,6)+'...'+id.slice(-4);return id;}
 function identityClass(id){return isWallet(id)?'user-hash wallet-addr':'user-hash';}
+
+// ── Wallet Connection ──
+var myWallet = localStorage.getItem('nous_wallet') || '';
+
+async function connectWallet(){
+  if(myWallet){
+    // Already connected — click to view usage
+    lookupFromBoard(myWallet);
+    return;
+  }
+  if(!window.ethereum){
+    // No MetaMask — fallback to manual input
+    var input=prompt('Enter your wallet address (0x...):');
+    if(input&&isWallet(input.trim().toLowerCase())){
+      setWallet(input.trim().toLowerCase());
+    }
+    return;
+  }
+  try{
+    var accounts=await window.ethereum.request({method:'eth_requestAccounts'});
+    if(accounts&&accounts[0]){
+      setWallet(accounts[0].toLowerCase());
+    }
+  }catch(e){if(e.code!==4001)alert('Wallet connection failed.');}
+}
+
+function setWallet(addr){
+  myWallet=addr;
+  localStorage.setItem('nous_wallet',addr);
+  updateWalletBtn();
+  loadLeaderboard(currentPeriod);
+}
+
+function updateWalletBtn(){
+  var btn=document.getElementById('walletBtn');
+  if(myWallet){
+    btn.textContent=myWallet.slice(0,6)+'...'+myWallet.slice(-4);
+    btn.classList.add('connected');
+  } else {
+    btn.textContent='Connect';
+    btn.classList.remove('connected');
+  }
+}
+
+function isMyRow(id){return myWallet&&id.toLowerCase()===myWallet;}
+
+updateWalletBtn();
 
 // ── Init + Auto-refresh ──
 loadStats();
