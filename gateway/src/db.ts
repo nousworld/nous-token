@@ -112,24 +112,20 @@ export async function recordUsage(
       .join("");
   }
 
-  // Resolve wallet: if this hash is already bound, use the bound wallet (first bind wins)
+  // Resolve wallet: use request wallet if provided, otherwise fall back to previously bound wallet
   let resolvedWallet = wallet || "";
   const cached = walletCache.get(userHash);
 
-  if (cached !== undefined) {
-    // Cache hit — use cached wallet (empty string means "no wallet bound yet")
-    if (cached) resolvedWallet = cached;
-  } else {
-    // Cache miss — query DB
-    const existing = await db.prepare(
-      `SELECT wallet FROM usage_records WHERE user_hash = ? AND wallet != '' LIMIT 1`
-    ).bind(userHash).first<{ wallet: string }>();
-
-    if (existing) {
-      resolvedWallet = existing.wallet;
-      walletCache.set(userHash, existing.wallet);
+  if (!resolvedWallet) {
+    // No wallet in this request — use cached/stored wallet
+    if (cached !== undefined) {
+      resolvedWallet = cached;
     } else {
-      walletCache.set(userHash, "");
+      const existing = await db.prepare(
+        `SELECT wallet FROM usage_records WHERE user_hash = ? AND wallet != '' LIMIT 1`
+      ).bind(userHash).first<{ wallet: string }>();
+      resolvedWallet = existing?.wallet || "";
+      walletCache.set(userHash, resolvedWallet);
     }
   }
 
@@ -157,12 +153,16 @@ export async function recordUsage(
     )
     .run();
 
-  // Backfill: if this is the first wallet binding, update old records and update cache
-  if (resolvedWallet && !cached) {
+  // Update cache and backfill empty records on first binding
+  if (resolvedWallet) {
+    const prevWallet = cached !== undefined ? cached : "";
     walletCache.set(userHash, resolvedWallet);
-    await db.prepare(
-      `UPDATE usage_records SET wallet = ? WHERE user_hash = ? AND wallet = ''`
-    ).bind(resolvedWallet, userHash).run();
+    // Only backfill records with no wallet — don't touch records already bound to another wallet
+    if (!prevWallet) {
+      await db.prepare(
+        `UPDATE usage_records SET wallet = ? WHERE user_hash = ? AND wallet = ''`
+      ).bind(resolvedWallet, userHash).run();
+    }
   }
 
   // Update MMR
