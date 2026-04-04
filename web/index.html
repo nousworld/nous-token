@@ -530,21 +530,23 @@ function identityClass(id){return isWallet(id)?'user-hash wallet-addr':'user-has
 var myWallet = localStorage.getItem('nous_wallet') || '';
 
 async function connectWallet(){
+  // If MetaMask available, always try it (even if already connected — lets user switch wallet)
+  if(window.ethereum){
+    try{
+      var accounts=await window.ethereum.request({method:'eth_requestAccounts'});
+      if(accounts&&accounts[0]){
+        setWallet(accounts[0].toLowerCase());
+        lookupFromBoard(accounts[0].toLowerCase());
+      }
+    }catch(e){if(e.code!==4001)alert('Wallet connection failed.');}
+    return;
+  }
+  // No MetaMask — show modal if not connected, or go to usage if connected
   if(myWallet){
-    // Already connected — click to view usage
     lookupFromBoard(myWallet);
-    return;
-  }
-  if(!window.ethereum){
+  } else {
     openModal();
-    return;
   }
-  try{
-    var accounts=await window.ethereum.request({method:'eth_requestAccounts'});
-    if(accounts&&accounts[0]){
-      setWallet(accounts[0].toLowerCase());
-    }
-  }catch(e){if(e.code!==4001)alert('Wallet connection failed.');}
 }
 
 function setWallet(addr){
