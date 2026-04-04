@@ -155,29 +155,12 @@ const tools: Tool[] = [
 
 // ── Shell env helper ──
 
+// Collect env vars to set — don't write to shell rc file
+const envCommands: string[] = [];
+
 function setShellEnv(key: string, value: string, toolName: string): ConfigResult {
-  const shell = process.env.SHELL || "/bin/bash";
-  const rcFile = shell.includes("zsh") ? join(HOME, ".zshrc") : join(HOME, ".bashrc");
-
-  if (existsSync(rcFile)) {
-    const content = readFileSync(rcFile, "utf-8");
-    // Check if already configured with the exact same value
-    if (content.includes(`${key}="${value}"`)) {
-      return { success: true, message: "already configured" };
-    }
-    // Remove old nous-token setting if exists, then write new one
-    const lines = content.split("\n").filter(l => !(l.includes(`${key}=`) && l.includes("nousai")));
-    lines.push(`export ${key}="${value}"  # nous-token gateway`);
-    writeFileSync(rcFile, lines.join("\n"));
-  } else {
-    writeFileSync(rcFile, `export ${key}="${value}"  # nous-token gateway\n`);
-  }
-
-  // Also set in current process
-  process.env[key] = value;
-
-  const rcName = rcFile.includes("zsh") ? "~/.zshrc" : "~/.bashrc";
-  return { success: true, message: `set ${key} in ${rcName}` };
+  envCommands.push(`export ${key}="${value}"`);
+  return { success: true, message: `${key}` };
 }
 
 
@@ -250,9 +233,14 @@ for (const tool of tools) {
 console.log("");
 
 if (configured > 0) {
-  console.log(`  \x1b[32m${configured} tool(s) configured.\x1b[0m`);
+  console.log(`  \x1b[32m${configured} tool(s) detected.\x1b[0m\n`);
+  console.log("  \x1b[1mThis terminal only:\x1b[0m");
+  console.log(`  \x1b[36m${envCommands.join(" && ")}\x1b[0m\n`);
+  console.log("  \x1b[1mAll terminals (permanent):\x1b[0m");
+  const shell = process.env.SHELL || "/bin/bash";
+  const rcFile = shell.includes("zsh") ? "~/.zshrc" : "~/.bashrc";
+  console.log(`  \x1b[36mecho '${envCommands.join("\\n")}' >> ${rcFile} && source ${rcFile}\x1b[0m\n`);
   console.log(`  See your usage at \x1b[4mhttps://token.nousai.cc\x1b[0m`);
-  console.log(`  Run \x1b[1msource ~/.zshrc\x1b[0m to apply changes in this terminal.`);
 } else {
   console.log("  No AI tools found. Install Claude Code, Cursor, or any OpenAI-compatible tool.");
 }
