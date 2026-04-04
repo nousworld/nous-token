@@ -561,10 +561,19 @@ function updateWalletBtn(){
   if(myWallet){
     btn.textContent=myWallet.slice(0,6)+'...'+myWallet.slice(-4);
     btn.classList.add('connected');
+    btn.onclick=disconnectWallet;
   } else {
     btn.textContent='Connect';
     btn.classList.remove('connected');
+    btn.onclick=connectWallet;
   }
+}
+
+function disconnectWallet(){
+  myWallet='';
+  localStorage.removeItem('nous_wallet');
+  updateWalletBtn();
+  loadLeaderboard(currentPeriod);
 }
 
 function isMyRow(id){return myWallet&&id.toLowerCase()===myWallet;}
