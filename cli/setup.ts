@@ -202,7 +202,15 @@ let wallet = loadWallet();
 const walletArg = process.argv.find(a => /^0x[a-fA-F0-9]{40}$/.test(a));
 if (walletArg) {
   wallet = walletArg.toLowerCase();
-} else if (!wallet) {
+} else if (wallet) {
+  // Existing wallet — ask user to confirm or change
+  const input = await ask(`  Wallet [${wallet.slice(0, 6)}...${wallet.slice(-4)}] (press Enter to keep, or paste new): `);
+  if (input && /^0x[a-fA-F0-9]{40}$/.test(input)) {
+    wallet = input.toLowerCase();
+  } else if (input) {
+    console.log("  \x1b[33mInvalid address format. Keeping current wallet.\x1b[0m");
+  }
+} else {
   const input = await ask("  Wallet address (0x...): ");
   if (/^0x[a-fA-F0-9]{40}$/.test(input)) {
     wallet = input.toLowerCase();
