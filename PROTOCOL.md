@@ -87,7 +87,7 @@ Users identify themselves with an Ethereum wallet address. The wallet is the per
 
 ### Binding rules
 
-- **First bind wins**: Once a hash is linked to a wallet, it cannot be relinked to a different wallet. This prevents rebinding with expired or leaked API keys.
+- **First bind wins**: Once a hash is linked to a wallet, it cannot be relinked to a different wallet. This prevents rebinding with expired or leaked API keys. Binding is irreversible — verify your wallet address before your first API call through the gateway.
 - **Multiple hashes per wallet**: A user can link multiple API keys (hashes) to the same wallet. The leaderboard aggregates all hashes under one wallet.
 - **Wallet validation**: Must be a valid Ethereum address (`0x` + 40 hex chars). Invalid addresses are silently ignored.
 
