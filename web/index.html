@@ -43,6 +43,17 @@ nav { border-bottom:1px solid var(--silk); background:var(--parchment); position
 .wallet-btn.connected { background:var(--teal-w); border-color:var(--teal); color:var(--teal); cursor:default; }
 .wallet-btn.connected:hover { background:var(--teal-w); color:var(--teal); }
 
+/* Wallet dropdown */
+.wallet-dropdown { position:relative; display:inline-block; }
+.wallet-menu { display:none; position:absolute; top:calc(100% + 8px); right:0; background:var(--white); border:1px solid var(--silk); border-radius:10px; box-shadow:0 8px 24px rgba(0,0,0,0.08); min-width:200px; z-index:150; overflow:hidden; }
+.wallet-menu.active { display:block; animation:menuFade .15s ease; }
+@keyframes menuFade { from{opacity:0;transform:translateY(-4px)} to{opacity:1;transform:translateY(0)} }
+.wallet-menu-header { padding:14px 16px; border-bottom:1px solid var(--silk); font-family:'SF Mono','Fira Code',monospace; font-size:11px; color:var(--teal); word-break:break-all; line-height:1.5; }
+.wallet-menu-item { padding:12px 16px; font-size:13px; color:var(--charcoal); cursor:pointer; transition:background .1s; display:flex; align-items:center; gap:8px; }
+.wallet-menu-item:hover { background:var(--teal-w); }
+.wallet-menu-item.danger { color:#c0392b; }
+.wallet-menu-item.danger:hover { background:rgba(192,57,43,0.06); }
+
 /* Modal */
 .modal-overlay { display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.3); z-index:200; align-items:center; justify-content:center; }
 .modal-overlay.active { display:flex; }
@@ -158,7 +169,14 @@ footer a:hover { text-decoration:underline; }
     <div class="nav-links">
       <a href="https://github.com/nousworld/nous-token" target="_blank">GitHub</a>
       <a href="https://github.com/nousworld/nous-token/blob/main/PROTOCOL.md" target="_blank">Protocol</a>
-      <button class="wallet-btn" id="walletBtn" onclick="connectWallet()">Connect</button>
+      <div class="wallet-dropdown" id="walletDropdown">
+        <button class="wallet-btn" id="walletBtn" onclick="connectWallet()">Connect</button>
+        <div class="wallet-menu" id="walletMenu">
+          <div class="wallet-menu-header" id="walletMenuAddr"></div>
+          <div class="wallet-menu-item" onclick="lookupFromBoard(myWallet);closeWalletMenu()">My Usage</div>
+          <div class="wallet-menu-item danger" onclick="disconnectWallet()">Disconnect</div>
+        </div>
+      </div>
     </div>
   </div>
 </nav>
@@ -561,20 +579,36 @@ function updateWalletBtn(){
   if(myWallet){
     btn.textContent=myWallet.slice(0,6)+'...'+myWallet.slice(-4);
     btn.classList.add('connected');
-    btn.onclick=disconnectWallet;
+    btn.onclick=toggleWalletMenu;
+    document.getElementById('walletMenuAddr').textContent=myWallet;
   } else {
     btn.textContent='Connect';
     btn.classList.remove('connected');
     btn.onclick=connectWallet;
+    closeWalletMenu();
   }
+}
+
+function toggleWalletMenu(){
+  var m=document.getElementById('walletMenu');
+  m.classList.toggle('active');
+}
+function closeWalletMenu(){
+  document.getElementById('walletMenu').classList.remove('active');
 }
 
 function disconnectWallet(){
   myWallet='';
   localStorage.removeItem('nous_wallet');
+  closeWalletMenu();
   updateWalletBtn();
   loadLeaderboard(currentPeriod);
 }
+
+// Close dropdown when clicking outside
+document.addEventListener('click',function(e){
+  if(!document.getElementById('walletDropdown').contains(e.target))closeWalletMenu();
+});
 
 function isMyRow(id){return myWallet&&id.toLowerCase()===myWallet;}
 
