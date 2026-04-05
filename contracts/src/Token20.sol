@@ -75,6 +75,7 @@ contract Token20 is ERC721, Ownable, Pausable {
     uint256 public minInscriptionFee = 1_000000;   // 1 USDC (= protocol fee)
     uint256 public constant PROTOCOL_FEE = 1_000000;     // 1 USDC fixed
     uint256 public anchorInterval = 300;          // ~10 min on Base
+    uint256 public maxAnchorAge = 43200;          // ~24h on Base (2s blocks)
 
     uint256 private _nextTokenId = 1;
     uint256 private _nextSeriesId = 1;
@@ -127,6 +128,8 @@ contract Token20 is ERC721, Ownable, Pausable {
     event GatewayRevoked(address indexed gateway);
     event Authorized(uint256 indexed seriesId, address indexed addr);
     event AuthRevoked(uint256 indexed seriesId, address indexed addr);
+    event AdminParamChanged(string param, uint256 value);
+    event AnchorInvalidated(uint256 indexed periodStart);
 
     // ─── Constructor ───
 
@@ -352,11 +355,18 @@ contract Token20 is ERC721, Ownable, Pausable {
         require(gateways[msg.sender], "Not a registered gateway");
         require(periodStart % anchorInterval == 0, "Period not aligned to interval");
         require(periodStart <= block.number, "Future period");
+        require(block.number - periodStart <= maxAnchorAge, "Period too old");
         require(anchors[periodStart] == bytes32(0), "Period already anchored");
         require(merkleRoot != bytes32(0), "Empty root");
 
         anchors[periodStart] = merkleRoot;
         emit Anchor(periodStart, merkleRoot, receiptCount, msg.sender);
+    }
+
+    function invalidateAnchor(uint256 periodStart) external onlyOwner {
+        require(anchors[periodStart] != bytes32(0), "Period not anchored");
+        anchors[periodStart] = bytes32(0);
+        emit AnchorInvalidated(periodStart);
     }
 
     // ─── Series Authorization ───
@@ -403,11 +413,24 @@ contract Token20 is ERC721, Ownable, Pausable {
     function pause() external onlyOwner { _pause(); }
     function unpause() external onlyOwner { _unpause(); }
 
-    function setDeployFee(uint256 fee) external onlyOwner { deployFee = fee; }
-    function setMinInscriptionFee(uint256 fee) external onlyOwner { minInscriptionFee = fee; }
+    function setDeployFee(uint256 fee) external onlyOwner {
+        deployFee = fee;
+        emit AdminParamChanged("deployFee", fee);
+    }
+    function setMinInscriptionFee(uint256 fee) external onlyOwner {
+        require(fee >= PROTOCOL_FEE, "Below protocol fee");
+        minInscriptionFee = fee;
+        emit AdminParamChanged("minInscriptionFee", fee);
+    }
     function setAnchorInterval(uint256 blocks) external onlyOwner {
         require(blocks > 0, "Interval must be > 0");
         anchorInterval = blocks;
+        emit AdminParamChanged("anchorInterval", blocks);
+    }
+    function setMaxAnchorAge(uint256 blocks) external onlyOwner {
+        require(blocks > 0, "Age must be > 0");
+        maxAnchorAge = blocks;
+        emit AdminParamChanged("maxAnchorAge", blocks);
     }
 
     function withdraw(address to, uint256 amount) external onlyOwner {

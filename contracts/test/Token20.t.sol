@@ -784,8 +784,13 @@ contract Token20Test is Test {
     }
 
     function test_setMinInscriptionFee() public {
+        token.setMinInscriptionFee(2_000000);
+        assertEq(token.minInscriptionFee(), 2_000000);
+    }
+
+    function test_setMinInscriptionFeeBelowProtocol_reverts() public {
+        vm.expectRevert("Below protocol fee");
         token.setMinInscriptionFee(500000);
-        assertEq(token.minInscriptionFee(), 500000);
     }
 
     function test_setAnchorInterval() public {
@@ -889,6 +894,54 @@ contract Token20Test is Test {
     function test_setAnchorIntervalZero_reverts() public {
         vm.expectRevert("Interval must be > 0");
         token.setAnchorInterval(0);
+    }
+
+    function test_invalidateAnchor() public {
+        vm.prank(gateway);
+        token.anchor(300, keccak256("root"), 5);
+        assertEq(token.anchors(300), keccak256("root"));
+
+        token.invalidateAnchor(300);
+        assertEq(token.anchors(300), bytes32(0));
+    }
+
+    function test_invalidateAnchorNonOwner_reverts() public {
+        vm.prank(gateway);
+        token.anchor(300, keccak256("root"), 5);
+
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", alice));
+        token.invalidateAnchor(300);
+    }
+
+    function test_invalidateAnchorNotAnchored_reverts() public {
+        vm.expectRevert("Period not anchored");
+        token.invalidateAnchor(300);
+    }
+
+    function test_anchorTooOld_reverts() public {
+        // block.number is 1000, maxAnchorAge is 43200
+        // period 0 is 1000 blocks old — should pass
+        vm.prank(gateway);
+        token.anchor(0, keccak256("root"), 5);
+
+        // Set maxAnchorAge to 100 blocks
+        token.setMaxAnchorAge(100);
+
+        // period 300 is 700 blocks old — should fail
+        vm.prank(gateway);
+        vm.expectRevert("Period too old");
+        token.anchor(300, keccak256("root2"), 5);
+    }
+
+    function test_setMaxAnchorAge() public {
+        token.setMaxAnchorAge(100);
+        assertEq(token.maxAnchorAge(), 100);
+    }
+
+    function test_setMaxAnchorAgeZero_reverts() public {
+        vm.expectRevert("Age must be > 0");
+        token.setMaxAnchorAge(0);
     }
 
     // ─── JSON Injection Tests ───
