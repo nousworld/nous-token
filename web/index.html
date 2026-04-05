@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>NOUS Token — Global AI Usage</title>
-<meta name="description" content="See how much the world spends on AI. Open-source, verifiable, real data from provider responses.">
+<title>NOUS Token — AI Compute Proofs on Base</title>
+<meta name="description" content="Everything you spend on AI becomes an asset you own. Verifiable AI compute proofs on Base.">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
 :root {
@@ -34,7 +34,6 @@ a:hover { text-decoration:underline; }
 nav { border-bottom:1px solid var(--silk); background:var(--parchment); position:sticky; top:0; z-index:100; }
 .nav-inner { max-width:1000px; margin:0 auto; padding:16px 40px; display:flex; align-items:center; justify-content:space-between; }
 .nav-logo { font-size:18px; font-weight:800; letter-spacing:3px; color:var(--charcoal); cursor:default; user-select:none; }
-.nav-logo span { display:none; }
 .nav-links { display:flex; gap:24px; align-items:center; font-size:13px; }
 .nav-links a { color:var(--sage); text-decoration:none; transition:color .2s; }
 .nav-links a:hover { color:var(--charcoal); text-decoration:none; }
@@ -61,7 +60,7 @@ nav { border-bottom:1px solid var(--silk); background:var(--parchment); position
 .modal-title { font-size:16px; font-weight:600; margin-bottom:16px; color:var(--charcoal); }
 .modal-close { float:right; background:none; border:none; font-size:18px; color:var(--sage); cursor:pointer; padding:0; line-height:1; }
 
-/* Hero — pulse canvas + stats */
+/* Hero */
 .hero { position:relative; padding:64px 40px 48px; text-align:center; overflow:hidden; }
 .hero canvas { position:absolute; top:0; left:0; width:100%; height:100%; opacity:0.4; pointer-events:none; }
 .hero-label { font-size:11px; text-transform:uppercase; letter-spacing:3px; color:var(--teal); font-weight:500; margin-bottom:12px; position:relative; }
@@ -125,13 +124,27 @@ nav { border-bottom:1px solid var(--silk); background:var(--parchment); position
 .user-card-hash { font-family:'SF Mono','Fira Code',monospace; font-size:14px; color:var(--teal); margin-bottom:12px; word-break:break-all; }
 .user-card-stats { display:flex; gap:36px; flex-wrap:wrap; }
 
-/* Proof / Store */
-.proof-section { margin-top:36px; padding:28px; border:1.5px dashed var(--clay); border-radius:var(--radius); text-align:center; background:var(--linen); }
-.proof-btn { padding:12px 28px; border:none; border-radius:10px; background:var(--teal); color:var(--white); font-size:14px; font-weight:600; cursor:pointer; font-family:inherit; transition:all .2s; }
-.proof-btn:hover { background:var(--teal-deep); transform:translateY(-1px); box-shadow:0 4px 12px var(--teal-glow); }
-.proof-btn-outline { background:var(--white); color:var(--teal); border:1px solid var(--teal); }
-.proof-btn-outline:hover { background:var(--teal-w); }
-.proof-desc { font-size:12px; color:var(--sage); margin-top:10px; line-height:1.6; }
+/* Cards */
+.card-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:16px; margin-bottom:28px; }
+.series-card { background:var(--white); border:1px solid var(--silk); border-radius:var(--radius); padding:20px; cursor:pointer; transition:all .15s; }
+.series-card:hover { border-color:var(--teal); box-shadow:0 4px 12px var(--teal-glow); }
+.series-card-name { font-size:16px; font-weight:700; margin-bottom:8px; }
+.series-card-model { font-size:12px; color:var(--teal); margin-bottom:12px; }
+.series-card-row { display:flex; justify-content:space-between; font-size:12px; color:var(--sage); margin-top:6px; }
+.series-card-row span:last-child { color:var(--charcoal); font-weight:500; }
+
+/* Proof card */
+.proof-card { background:var(--white); border:1px solid var(--silk); border-radius:var(--radius); padding:20px; }
+.proof-card-title { font-size:14px; font-weight:600; margin-bottom:4px; }
+.proof-card-model { font-size:12px; color:var(--teal); margin-bottom:8px; }
+.proof-card-detail { font-size:11px; color:var(--sage); margin-top:4px; }
+
+/* Buttons */
+.btn { padding:12px 28px; border:none; border-radius:10px; background:var(--teal); color:var(--white); font-size:14px; font-weight:600; cursor:pointer; font-family:inherit; transition:all .2s; }
+.btn:hover { background:var(--teal-deep); transform:translateY(-1px); box-shadow:0 4px 12px var(--teal-glow); }
+.btn:disabled { opacity:0.5; cursor:not-allowed; transform:none; box-shadow:none; }
+.btn-outline { background:var(--white); color:var(--teal); border:1px solid var(--teal); }
+.btn-outline:hover { background:var(--teal-w); }
 
 /* Setup */
 .claim-box { max-width:440px; margin:0 auto; text-align:center; padding:40px 0; }
@@ -158,6 +171,7 @@ footer a:hover { text-decoration:underline; }
   .content { padding:20px 20px 60px; }
   .table td, .table th { padding:10px 6px; font-size:12px; }
   .user-hash { font-size:10px; }
+  .card-grid { grid-template-columns:1fr; }
 }
 </style>
 </head>
@@ -173,6 +187,7 @@ footer a:hover { text-decoration:underline; }
         <button class="wallet-btn" id="walletBtn" onclick="connectWallet()">Connect</button>
         <div class="wallet-menu" id="walletMenu">
           <div class="wallet-menu-header" id="walletMenuAddr"></div>
+          <div class="wallet-menu-item" onclick="showTab('proofs');closeWalletMenu()">My Proofs</div>
           <div class="wallet-menu-item" onclick="lookupFromBoard(myWallet);closeWalletMenu()">My Usage</div>
           <div class="wallet-menu-item danger" onclick="disconnectWallet()">Disconnect</div>
         </div>
@@ -183,8 +198,8 @@ footer a:hover { text-decoration:underline; }
 
 <div class="hero">
   <canvas id="pulseCanvas"></canvas>
-  <div class="hero-label">Global AI Usage<span class="live-dot"></span></div>
-  <div class="hero-title">Every token, verified.</div>
+  <div class="hero-label">AI Compute Proofs<span class="live-dot"></span></div>
+  <div class="hero-title">Everything you spend on AI becomes an asset you own.</div>
   <div class="stats-row">
     <div class="stat">
       <div class="stat-value teal" id="statTokens">0</div>
@@ -208,6 +223,8 @@ footer a:hover { text-decoration:underline; }
 <div class="tabs">
   <div class="tab active" onclick="showTab('leaderboard')">Leaderboard</div>
   <div class="tab" onclick="showTab('models')">Models</div>
+  <div class="tab" onclick="showTab('series')">Series</div>
+  <div class="tab" onclick="showTab('proofs')">My Proofs</div>
   <div class="tab" onclick="showTab('lookup')">Look Up</div>
   <div class="tab" onclick="showTab('setup')">Setup</div>
 </div>
@@ -231,6 +248,18 @@ footer a:hover { text-decoration:underline; }
     <div id="modelsContent"><div class="loading">Loading...</div></div>
   </div>
 
+  <!-- Series -->
+  <div class="section" id="sec-series">
+    <div id="seriesContent"><div class="loading">Loading series...</div></div>
+  </div>
+
+  <!-- My Proofs -->
+  <div class="section" id="sec-proofs">
+    <div id="proofsContent">
+      <div class="loading">Connect wallet to see your proofs.</div>
+    </div>
+  </div>
+
   <!-- Lookup -->
   <div class="section" id="sec-lookup">
     <div class="search-row">
@@ -252,13 +281,15 @@ footer a:hover { text-decoration:underline; }
         <code style="background:var(--white);padding:4px 12px;border-radius:6px;border:1px solid var(--silk);font-size:13px">npx nous-token setup</code><br>
         Enter your wallet address. It scans your AI tools and routes them through the gateway.<br><br>
         <strong>2. Use AI as usual</strong><br>
-        Every token is recorded automatically. Your wallet is your permanent identity — change keys, switch machines, your usage follows you.
+        Every token is recorded automatically. Your wallet accumulates AI compute receipts.<br><br>
+        <strong>3. Mint proofs</strong><br>
+        When you hit a series threshold, mint an ERC-721 proof on Base. Your AI spending becomes an asset you own.
       </div>
       <div style="margin-top:28px;padding-top:24px;border-top:1px solid var(--silk)">
         <div style="font-size:13px;color:var(--sage);margin-bottom:12px">Look up your wallet:</div>
         <div style="display:flex;gap:8px;justify-content:center;max-width:400px;margin:0 auto">
           <input class="search-input" id="setupWalletInput" placeholder="0x..." style="font-size:13px" onkeydown="if(event.key==='Enter')lookupFromBoard(this.value.trim())">
-          <button class="proof-btn" style="white-space:nowrap" onclick="lookupFromBoard(document.getElementById('setupWalletInput').value.trim())">Look Up</button>
+          <button class="btn" style="white-space:nowrap;padding:10px 20px" onclick="lookupFromBoard(document.getElementById('setupWalletInput').value.trim())">Look Up</button>
         </div>
       </div>
     </div>
@@ -269,32 +300,35 @@ footer a:hover { text-decoration:underline; }
   <div class="modal">
     <button class="modal-close" onclick="closeModal()">&times;</button>
     <div class="modal-title">Connect wallet</div>
-    <div style="font-size:13px;color:var(--sage);margin-bottom:20px">Enter your Ethereum wallet address to track your rank on the leaderboard.</div>
+    <div style="font-size:13px;color:var(--sage);margin-bottom:20px">Connect your wallet to view your proofs and inscribe new ones.</div>
     <input class="search-input" id="modalWalletInput" placeholder="0x..." style="font-size:14px;margin-bottom:16px" onkeydown="if(event.key==='Enter')submitModal()">
-    <button class="proof-btn" style="width:100%" onclick="submitModal()">Connect</button>
+    <button class="btn" style="width:100%" onclick="submitModal()">Connect</button>
   </div>
 </div>
 
 <footer>
-  <a href="https://github.com/nousworld/nous-token" target="_blank">nous-token</a> &middot;
-  Open-source AI usage tracker. Don't trust, verify.
+  <a href="https://github.com/nousworld/nous-token" target="_blank">token-20</a> &middot;
+  Verifiable AI compute proofs on Base. &middot;
+  <a href="/terms.html">Terms</a>
 </footer>
 
 <script>
 var API = 'https://gateway.nousai.cc';
 if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') API = 'http://localhost:8787';
 
+var CONTRACT = '0xbc9BE1336DAf8eEeBb31ABde8c0cC871bdb7502D';
+var USDC_ADDR = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
+var BASE_CHAIN_ID = '0x2105';
 var currentPeriod = 30, currentModelPeriod = 30;
 
-// ── Pulse Canvas (subtle grid of dots that glow) ──
+// ── Pulse Canvas ──
 (function(){
   var c = document.getElementById('pulseCanvas');
   var ctx = c.getContext('2d');
   var dots = [];
-  var W, H;
   function resize(){
-    W = c.width = c.offsetWidth * devicePixelRatio;
-    H = c.height = c.offsetHeight * devicePixelRatio;
+    c.width = c.offsetWidth * devicePixelRatio;
+    c.height = c.offsetHeight * devicePixelRatio;
     ctx.scale(devicePixelRatio, devicePixelRatio);
     dots = [];
     var spacing = 48;
@@ -308,30 +342,21 @@ var currentPeriod = 30, currentModelPeriod = 30;
     ctx.clearRect(0,0,c.offsetWidth,c.offsetHeight);
     for(var i=0;i<dots.length;i++){
       var d=dots[i];
-      var alpha;
-      if(d.active){
-        alpha = 0.08 + 0.2 * Math.sin(t*0.001*d.speed + d.phase);
-        if(Math.random()<0.002){ d.active=false; }
-      } else {
-        alpha = 0.03;
-        if(Math.random()<0.001){ d.active=true; d.phase=t*0.001; }
-      }
+      var alpha = d.active ? 0.08 + 0.2 * Math.sin(t*0.001*d.speed + d.phase) : 0.03;
+      if(d.active && Math.random()<0.002) d.active=false;
+      if(!d.active && Math.random()<0.001){ d.active=true; d.phase=t*0.001; }
       ctx.beginPath();
       ctx.arc(d.x, d.y, d.active ? 2.5 : 1.5, 0, Math.PI*2);
       ctx.fillStyle = 'rgba(42,124,111,' + alpha + ')';
       ctx.fill();
       if(d.active){
-        ctx.beginPath();
-        ctx.arc(d.x, d.y, 8, 0, Math.PI*2);
-        ctx.fillStyle = 'rgba(42,124,111,' + (alpha*0.3) + ')';
-        ctx.fill();
+        ctx.beginPath(); ctx.arc(d.x, d.y, 8, 0, Math.PI*2);
+        ctx.fillStyle = 'rgba(42,124,111,' + (alpha*0.3) + ')'; ctx.fill();
       }
     }
     requestAnimationFrame(draw);
   }
-  resize();
-  window.addEventListener('resize', resize);
-  requestAnimationFrame(draw);
+  resize(); window.addEventListener('resize', resize); requestAnimationFrame(draw);
 })();
 
 // ── Counter Animation ──
@@ -343,8 +368,7 @@ function animateCounter(el, target, duration) {
     if (!startTime) startTime = ts;
     var progress = Math.min((ts - startTime) / duration, 1);
     var ease = 1 - Math.pow(1 - progress, 3);
-    var current = Math.round(start + (target - start) * ease);
-    el.textContent = formatNumber(current);
+    el.textContent = formatNumber(Math.round(start + (target - start) * ease));
     if (progress < 1) requestAnimationFrame(step);
   }
   requestAnimationFrame(step);
@@ -352,9 +376,14 @@ function animateCounter(el, target, duration) {
 
 // ── Tabs ──
 function showTab(name){
-  document.querySelectorAll('.tab').forEach(function(t){t.classList.toggle('active',t.textContent.toLowerCase().replace(/ /g,'')==name.toLowerCase())});
+  document.querySelectorAll('.tab').forEach(function(t){
+    var tabName = t.textContent.toLowerCase().replace(/ /g,'').replace('myproofs','proofs');
+    t.classList.toggle('active', tabName === name.toLowerCase());
+  });
   document.querySelectorAll('.section').forEach(function(s){s.classList.toggle('active',s.id==='sec-'+name)});
   if(name==='models'&&!document.getElementById('modelsContent').querySelector('table'))loadModels(currentModelPeriod);
+  if(name==='series')loadSeries();
+  if(name==='proofs')loadMyProofs();
 }
 
 // ── Stats ──
@@ -365,38 +394,33 @@ async function loadStats(){
       animateCounter(document.getElementById('statTokens'), d.data.total_tokens||0, 1200);
       animateCounter(document.getElementById('statCalls'), d.data.total_calls||0, 1000);
       animateCounter(document.getElementById('statUsers'), d.data.total_users||0, 800);
-      var me=document.getElementById('statModels');me.textContent=d.data.total_models||0;
+      document.getElementById('statModels').textContent=d.data.total_models||0;
     }
   }catch(e){}
 }
 
 // ── Leaderboard ──
-function setPeriod(d,b){currentPeriod=d;document.querySelectorAll('#sec-leaderboard .period-row .period-btn').forEach(function(x){x.classList.remove('active')});b.classList.add('active');loadLeaderboard(d);}
+function setPeriod(d,b){currentPeriod=d;document.querySelectorAll('#sec-leaderboard .period-btn').forEach(function(x){x.classList.remove('active')});b.classList.add('active');loadLeaderboard(d);}
 async function loadLeaderboard(days){
   var el=document.getElementById('leaderboardContent');el.innerHTML='<div class="loading">Loading...</div>';
   try{
     var r=await fetch(API+'/api/leaderboard?days='+days+'&limit=100');var d=await r.json();
-    if(!d.ok||!d.data||d.data.length===0){
-      el.innerHTML='<div class="loading">No data yet. Be the first.</div>';
-      return;
-    }
+    if(!d.ok||!d.data||d.data.length===0){el.innerHTML='<div class="loading">No data yet. Be the first.</div>';return;}
     var max=d.data[0].total_tokens||1;var myRank=0;
     var html='<table class="table"><thead><tr><th>#</th><th>User</th><th>Tokens</th><th>Calls</th><th></th></tr></thead><tbody>';
     for(var i=0;i<d.data.length;i++){
       var row=d.data[i];var rc=i<3?' rank-'+(i+1):'';var id=row.identity||row.user_hash;
       var pct=Math.round((row.total_tokens/max)*100);var mine=isMyRow(id);
       if(mine)myRank=i+1;
-      html+='<tr onclick="lookupFromBoard(\''+escapeHtml(id)+'\')" class="'+(mine?'my-row':'')+'" style="cursor:pointer;animation-delay:'+(i*0.04)+'s">'
+      html+='<tr onclick="lookupFromBoard(\''+esc(id)+'\')" class="'+(mine?'my-row':'')+'" style="cursor:pointer;animation-delay:'+(i*0.04)+'s">'
         +'<td class="rank'+rc+'">'+(i+1)+'</td>'
-        +'<td class="'+identityClass(id)+'" title="'+escapeHtml(id)+'">'+escapeHtml(formatIdentity(id))+(mine?' (you)':'')+'</td>'
+        +'<td class="'+idClass(id)+'" title="'+esc(id)+'">'+esc(fmtId(id))+(mine?' (you)':'')+'</td>'
         +'<td class="tokens">'+formatNumber(row.total_tokens)+'</td>'
         +'<td class="calls">'+formatNumber(row.call_count)+'</td>'
-        +'<td class="bar-cell"><div class="bar-bg"><div class="bar-fill" style="width:'+pct+'%"></div></div></td>'
-        +'</tr>';
+        +'<td class="bar-cell"><div class="bar-bg"><div class="bar-fill" style="width:'+pct+'%"></div></div></td></tr>';
     }
     html+='</tbody></table>';
     if(myWallet&&myRank)html+='<div style="font-size:12px;color:var(--teal);margin-top:12px;font-weight:500">Your rank: #'+myRank+'</div>';
-    else if(myWallet&&!myRank)html+='<div style="font-size:12px;color:var(--sage);margin-top:12px">Your wallet is not in the top 100 yet.</div>';
     el.innerHTML=html;
   }catch(e){el.innerHTML='<div class="loading">Failed to load.</div>';}
 }
@@ -412,50 +436,92 @@ async function loadModels(days){
     var html='<table class="table"><thead><tr><th>Model</th><th>Tokens</th><th>Users</th><th>Calls</th><th></th></tr></thead><tbody>';
     for(var i=0;i<d.data.length;i++){
       var row=d.data[i];var pct=Math.round((row.total_tokens/max)*100);
-      html+='<tr onclick="loadModelLeaderboard(\''+escapeHtml(row.model).replace(/'/g,"\\'")+'\','+days+')" style="cursor:pointer;animation-delay:'+(i*0.04)+'s">'
-        +'<td class="model-name">'+escapeHtml(row.model)+'</td>'
+      html+='<tr style="cursor:pointer;animation-delay:'+(i*0.04)+'s">'
+        +'<td class="model-name">'+esc(row.model)+'</td>'
         +'<td class="tokens">'+formatNumber(row.total_tokens)+'</td>'
         +'<td>'+(row.unique_users||0)+'</td>'
         +'<td class="calls">'+formatNumber(row.call_count)+'</td>'
-        +'<td class="bar-cell"><div class="bar-bg"><div class="bar-fill" style="width:'+pct+'%"></div></div></td>'
-        +'</tr>';
+        +'<td class="bar-cell"><div class="bar-bg"><div class="bar-fill" style="width:'+pct+'%"></div></div></td></tr>';
     }
     html+='</tbody></table>';
     el.innerHTML=html;
   }catch(e){el.innerHTML='<div class="loading">Failed to load.</div>';}
 }
 
-// ── Model Leaderboard ──
-async function loadModelLeaderboard(model,days){
-  var el=document.getElementById('modelsContent');
-  el.innerHTML='<div class="loading">Loading...</div>';
+// ── Series (from contract via gateway API) ──
+async function loadSeries(){
+  var el=document.getElementById('seriesContent');el.innerHTML='<div class="loading">Loading series...</div>';
   try{
-    var r=await fetch(API+'/api/leaderboard/model?model='+encodeURIComponent(model)+'&days='+days+'&limit=100');
-    var d=await r.json();
-    var html='<div style="margin-bottom:20px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">'
-      +'<button class="period-btn" onclick="loadModels(currentModelPeriod)" style="font-size:13px">\u2190 All Models</button>'
-      +'<span class="model-name" style="font-size:16px">'+escapeHtml(model)+'</span>'
-      +'</div>';
-    if(!d.ok||!d.data||d.data.length===0){
-      html+='<div class="loading">No users for this model yet.</div>';
-      el.innerHTML=html;return;
-    }
-    var max=d.data[0].total_tokens||1;
-    html+='<table class="table"><thead><tr><th>#</th><th>User</th><th>Tokens</th><th>Calls</th><th></th></tr></thead><tbody>';
-    for(var i=0;i<d.data.length;i++){
-      var row=d.data[i];var rc=i<3?' rank-'+(i+1):'';var id=row.identity||row.user_hash;
-      var pct=Math.round((row.total_tokens/max)*100);
-      html+='<tr onclick="lookupFromBoard(\''+escapeHtml(id)+'\')" style="cursor:pointer;animation-delay:'+(i*0.04)+'s">'
-        +'<td class="rank'+rc+'">'+(i+1)+'</td>'
-        +'<td class="'+identityClass(id)+'" title="'+escapeHtml(id)+'">'+escapeHtml(formatIdentity(id))+'</td>'
-        +'<td class="tokens">'+formatNumber(row.total_tokens)+'</td>'
-        +'<td class="calls">'+formatNumber(row.call_count)+'</td>'
-        +'<td class="bar-cell"><div class="bar-bg"><div class="bar-fill" style="width:'+pct+'%"></div></div></td>'
-        +'</tr>';
-    }
-    html+='</tbody></table>';
+    // Read series from gateway t20 API
+    var r=await fetch(API+'/api/t20/anchors');var d=await r.json();
+    // For now, show series info from contract events via RPC
+    // Simplified: show the known series
+    var html='<div class="card-grid">';
+    html+=seriesCard(1,'Opus','claude-4.6',210000,10000,1000000,1);
+    html+='</div>';
+    html+='<div style="text-align:center;margin-top:20px;font-size:13px;color:#c0392b;font-weight:500">This is a test contract. Do not purchase or inscribe. Final contract coming soon.</div>';
     el.innerHTML=html;
-  }catch(e){el.innerHTML='<div class="loading">Failed to load.</div>';}
+  }catch(e){el.innerHTML='<div class="loading">Failed to load series.</div>';}
+}
+
+function seriesCard(id,name,model,maxSupply,threshold,fee,minted){
+  var feeStr=(fee/1e6).toFixed(2);
+  return '<div class="series-card" onclick="showInscribeModal('+id+',\''+esc(name)+'\',\''+esc(model)+'\','+threshold+','+fee+')">'
+    +'<div class="series-card-name">'+esc(name)+'</div>'
+    +'<div class="series-card-model">'+esc(model)+'</div>'
+    +'<div class="series-card-row"><span>Supply</span><span>'+minted+' / '+formatNumber(maxSupply)+'</span></div>'
+    +'<div class="series-card-row"><span>Threshold</span><span>'+formatNumber(threshold)+' tokens</span></div>'
+    +'<div class="series-card-row"><span>Fee</span><span>'+feeStr+' USDC</span></div>'
+    +'</div>';
+}
+
+// ── Inscribe Modal ──
+function showInscribeModal(seriesId,name,model,threshold,fee){
+  if(!myWallet){connectWallet();return;}
+  var feeStr=(fee/1e6).toFixed(2);
+  var modal=document.getElementById('walletModal');
+  var inner=modal.querySelector('.modal');
+  inner.innerHTML='<button class="modal-close" onclick="closeModal()">&times;</button>'
+    +'<div class="modal-title">Inscribe: '+esc(name)+'</div>'
+    +'<div style="font-size:13px;color:var(--sage);margin-bottom:16px">Model: '+esc(model)+'<br>Threshold: '+formatNumber(threshold)+' tokens<br>Fee: '+feeStr+' USDC</div>'
+    +'<div style="font-size:12px;color:var(--sage);margin-bottom:20px">You need a valid gateway receipt with at least '+formatNumber(threshold)+' tokens to inscribe. The gateway will handle the proof construction.</div>'
+    +'<button class="btn" style="width:100%" id="inscribeBtn" onclick="doInscribe('+seriesId+','+fee+')">Approve USDC &amp; Inscribe</button>';
+  modal.classList.add('active');
+}
+
+async function doInscribe(seriesId,fee){
+  var btn=document.getElementById('inscribeBtn');
+  btn.disabled=true;btn.textContent='Coming soon...';
+  // Full inscribe flow requires: receipt from gateway + signature + merkle proof
+  // This will be wired up when the gateway serves /api/t20/prepare-inscribe
+  setTimeout(function(){
+    btn.textContent='Inscribe flow in development';
+    setTimeout(function(){closeModal();},2000);
+  },1000);
+}
+
+// ── My Proofs ──
+async function loadMyProofs(){
+  var el=document.getElementById('proofsContent');
+  if(!myWallet){el.innerHTML='<div class="loading">Connect wallet to see your proofs.</div>';return;}
+  el.innerHTML='<div class="loading">Loading proofs...</div>';
+  try{
+    var r=await fetch(API+'/api/t20/wallet/'+myWallet);var d=await r.json();
+    if(!d.ok||!d.data||d.data.length===0){
+      el.innerHTML='<div class="loading">No proofs yet. Use AI through the gateway, then inscribe when you hit a series threshold.</div>';
+      return;
+    }
+    var html='<div class="card-grid">';
+    for(var i=0;i<d.data.length;i++){
+      var p=d.data[i];
+      html+='<div class="proof-card">'
+        +'<div class="proof-card-title">'+esc(p.model)+' &middot; '+formatNumber(p.tokens)+' tokens</div>'
+        +'<div class="proof-card-detail">Block '+p.block_number+(p.anchor_tx?' &middot; <a href="https://basescan.org/tx/'+p.anchor_tx+'" target="_blank">Anchor tx</a>':'')+'</div>'
+        +'</div>';
+    }
+    html+='</div>';
+    el.innerHTML=html;
+  }catch(e){el.innerHTML='<div class="loading">Failed to load proofs.</div>';}
 }
 
 // ── Lookup ──
@@ -471,7 +537,7 @@ async function lookupUser(){
     var tt=0,tc=0;
     for(var i=0;i<d.data.length;i++){tt+=d.data[i].total_tokens||0;tc+=d.data[i].call_count||0;}
     var html='<div class="user-card">';
-    html+='<div class="user-card-hash"'+(isWallet(hash)?' style="color:var(--teal)"':'')+'>'+escapeHtml(hash)+'</div>';
+    html+='<div class="user-card-hash"'+(isWallet(hash)?' style="color:var(--teal)"':'')+'>'+esc(hash)+'</div>';
     html+='<div class="user-card-stats">';
     html+='<div class="stat"><div class="stat-value teal" style="font-size:24px">'+formatNumber(tt)+'</div><div class="stat-label">Tokens</div></div>';
     html+='<div class="stat"><div class="stat-value" style="font-size:24px">'+formatNumber(tc)+'</div><div class="stat-label">Calls</div></div>';
@@ -482,151 +548,72 @@ async function lookupUser(){
     for(var i=0;i<d.data.length;i++){
       var row=d.data[i];
       html+='<tr style="animation-delay:'+(i*0.04)+'s">'
-        +'<td class="model-name">'+escapeHtml(row.model)+'</td>'
-        +(hasProvider?'<td><span class="provider-badge">'+escapeHtml(row.provider)+'</span></td>':'')
+        +'<td class="model-name">'+esc(row.model)+'</td>'
+        +(hasProvider?'<td><span class="provider-badge">'+esc(row.provider)+'</span></td>':'')
         +'<td>'+formatNumber(row.input_tokens)+'</td>'
         +'<td>'+formatNumber(row.output_tokens)+'</td>'
         +'<td class="calls">'+formatNumber(row.call_count)+'</td></tr>';
     }
     html+='</tbody></table>';
-    if(!isWallet(hash)){
-      html+='<div class="proof-section">';
-      html+='<div style="font-size:15px;font-weight:600;color:var(--charcoal);margin-bottom:14px">Store on-chain</div>';
-      html+='<div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">';
-      html+='<button class="proof-btn" onclick="storeReceipts(this,\''+escapeHtml(hash)+'\')">Store Receipts on BASE</button>';
-      html+='<button class="proof-btn proof-btn-outline" onclick="storeSummary(this,\''+escapeHtml(hash)+'\')">Store Summary on BASE</button>';
-      html+='</div>';
-      html+='<div class="proof-desc">Every API call generates a gateway-signed receipt. Store on BASE (~$0.01 gas). Anyone can verify with the gateway\'s public key.</div>';
-      html+='</div>';
-    }
     el.innerHTML=html;
   }catch(e){el.innerHTML='<div class="loading">Failed to load.</div>';}
 }
 
-// ── Store on BASE ──
-async function sendToBase(btn,label,payload){
-  if(!window.ethereum){alert('Install MetaMask to store proof on-chain.');return;}
-  var orig=btn.textContent;
-  try{
-    btn.textContent='Connect wallet...';btn.disabled=true;
-    await window.ethereum.request({method:'eth_requestAccounts'});
-    var cid=await window.ethereum.request({method:'eth_chainId'});
-    if(cid!=='0x2105'){try{await window.ethereum.request({method:'wallet_switchEthereumChain',params:[{chainId:'0x2105'}]})}catch(e){alert('Switch to Base network.');btn.textContent=orig;btn.disabled=false;return;}}
-    btn.textContent='Confirm in wallet...';
-    var hex='0x'+Array.from(new TextEncoder().encode(JSON.stringify(payload))).map(function(b){return b.toString(16).padStart(2,'0')}).join('');
-    var accts=await window.ethereum.request({method:'eth_accounts'});
-    await window.ethereum.request({method:'eth_sendTransaction',params:[{from:accts[0],to:accts[0],value:'0x0',data:hex}]});
-    alert(label+' stored on BASE!');
-  }catch(e){if(e.code!==4001)alert('Error: '+e.message);}finally{btn.textContent=orig;btn.disabled=false;}
-}
-async function storeReceipts(btn,h){
-  btn.textContent='Fetching...';btn.disabled=true;
-  try{var r=await fetch(API+'/api/user/'+h+'/receipts?limit=100');var d=await r.json();
-    if(!d.ok||!d.data||!d.data.length){alert('No receipts.');btn.textContent='Store Receipts on BASE';btn.disabled=false;return;}
-    var s=d.data.filter(function(r){return r.sig});if(!s.length){alert('No signed receipts.');btn.textContent='Store Receipts on BASE';btn.disabled=false;return;}
-    if(d.has_more&&!confirm('Only first '+s.length+' receipts will be stored. Continue?')){btn.textContent='Store Receipts on BASE';btn.disabled=false;return;}
-    await sendToBase(btn,s.length+' receipt(s)',{p:'nous',v:1,type:'receipts',user:h,count:s.length,receipts:s,gateway:API});
-  }catch(e){alert('Error: '+e.message);btn.textContent='Store Receipts on BASE';btn.disabled=false;}
-}
-async function storeSummary(btn,h){
-  btn.textContent='Signing...';btn.disabled=true;
-  try{var r=await fetch(API+'/api/sign',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_hash:h})});var d=await r.json();
-    if(!d.ok){alert('Failed: '+(d.error||''));btn.textContent='Store Summary on BASE';btn.disabled=false;return;}
-    await sendToBase(btn,'Summary',{proof:d.proof,sig:d.signature,gateway:API});
-  }catch(e){alert('Error: '+e.message);btn.textContent='Store Summary on BASE';btn.disabled=false;}
-}
-
-
 // ── Helpers ──
 function formatNumber(n){if(n==null)return'0';n=parseInt(n);if(n>=1e12)return(n/1e12).toFixed(1)+'T';if(n>=1e9)return(n/1e9).toFixed(1)+'B';if(n>=1e6)return(n/1e6).toFixed(1)+'M';if(n>=1e3)return(n/1e3).toFixed(1)+'K';return n.toString();}
-function escapeHtml(s){var d=document.createElement('div');d.appendChild(document.createTextNode(s));return d.innerHTML;}
+function esc(s){var d=document.createElement('div');d.appendChild(document.createTextNode(s));return d.innerHTML;}
 function isWallet(s){return/^0x[a-f0-9]{40}$/i.test(s);}
-function formatIdentity(id){if(isWallet(id))return id.slice(0,6)+'...'+id.slice(-4);return id;}
-function identityClass(id){return isWallet(id)?'user-hash wallet-addr':'user-hash';}
+function fmtId(id){return isWallet(id)?id.slice(0,6)+'...'+id.slice(-4):id;}
+function idClass(id){return isWallet(id)?'user-hash wallet-addr':'user-hash';}
 
-// ── Wallet Connection ──
+// ── Wallet ──
 var myWallet = localStorage.getItem('nous_wallet') || '';
 
 async function connectWallet(){
-  // If MetaMask available, always try it (even if already connected — lets user switch wallet)
   if(window.ethereum){
     try{
-      // Force MetaMask to show account picker every time
       await window.ethereum.request({method:'wallet_requestPermissions',params:[{eth_accounts:{}}]});
       var accounts=await window.ethereum.request({method:'eth_accounts'});
-      if(accounts&&accounts[0]){
-        setWallet(accounts[0].toLowerCase());
-        lookupFromBoard(accounts[0].toLowerCase());
-      }
+      if(accounts&&accounts[0]){setWallet(accounts[0].toLowerCase());}
     }catch(e){if(e.code!==4001)alert('Wallet connection failed.');}
     return;
   }
-  // No MetaMask — show modal if not connected, or go to usage if connected
-  if(myWallet){
-    lookupFromBoard(myWallet);
-  } else {
-    openModal();
-  }
+  if(myWallet){showTab('proofs');}else{openModal();}
 }
 
 function setWallet(addr){
-  myWallet=addr;
-  localStorage.setItem('nous_wallet',addr);
-  updateWalletBtn();
-  loadLeaderboard(currentPeriod);
+  myWallet=addr;localStorage.setItem('nous_wallet',addr);
+  updateWalletBtn();loadLeaderboard(currentPeriod);
 }
 
 function updateWalletBtn(){
   var btn=document.getElementById('walletBtn');
   if(myWallet){
     btn.textContent=myWallet.slice(0,6)+'...'+myWallet.slice(-4);
-    btn.classList.add('connected');
-    btn.onclick=toggleWalletMenu;
+    btn.classList.add('connected');btn.onclick=toggleWalletMenu;
     document.getElementById('walletMenuAddr').textContent=myWallet;
   } else {
-    btn.textContent='Connect';
-    btn.classList.remove('connected');
-    btn.onclick=connectWallet;
-    closeWalletMenu();
+    btn.textContent='Connect';btn.classList.remove('connected');
+    btn.onclick=connectWallet;closeWalletMenu();
   }
 }
 
-function toggleWalletMenu(){
-  var m=document.getElementById('walletMenu');
-  m.classList.toggle('active');
-}
-function closeWalletMenu(){
-  document.getElementById('walletMenu').classList.remove('active');
-}
-
-function disconnectWallet(){
-  myWallet='';
-  localStorage.removeItem('nous_wallet');
-  closeWalletMenu();
-  updateWalletBtn();
-  loadLeaderboard(currentPeriod);
-}
-
-// Close dropdown when clicking outside
-document.addEventListener('click',function(e){
-  if(!document.getElementById('walletDropdown').contains(e.target))closeWalletMenu();
-});
-
+function toggleWalletMenu(){document.getElementById('walletMenu').classList.toggle('active');}
+function closeWalletMenu(){document.getElementById('walletMenu').classList.remove('active');}
+function disconnectWallet(){myWallet='';localStorage.removeItem('nous_wallet');closeWalletMenu();updateWalletBtn();loadLeaderboard(currentPeriod);}
+document.addEventListener('click',function(e){if(!document.getElementById('walletDropdown').contains(e.target))closeWalletMenu();});
 function isMyRow(id){return myWallet&&id.toLowerCase()===myWallet;}
-
 function openModal(){document.getElementById('walletModal').classList.add('active');document.getElementById('modalWalletInput').focus();}
-function closeModal(){document.getElementById('walletModal').classList.remove('active');document.getElementById('modalWalletInput').value='';}
+function closeModal(){document.getElementById('walletModal').classList.remove('active');}
 function submitModal(){
   var v=document.getElementById('modalWalletInput').value.trim().toLowerCase();
   if(isWallet(v)){setWallet(v);closeModal();}
-  else{document.getElementById('modalWalletInput').style.borderColor='var(--amber)';setTimeout(function(){document.getElementById('modalWalletInput').style.borderColor='';},1500);}
+  else{var inp=document.getElementById('modalWalletInput');inp.style.borderColor='var(--amber)';setTimeout(function(){inp.style.borderColor='';},1500);}
 }
-
 updateWalletBtn();
 
-// ── Init + Auto-refresh ──
-loadStats();
-loadLeaderboard(30);
+// ── Init ──
+loadStats();loadLeaderboard(30);
 setInterval(loadStats, 30000);
 </script>
 </body>

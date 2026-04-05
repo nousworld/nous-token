@@ -57,10 +57,13 @@ export default function plugin(api: OpenClawPluginApi): void {
   if (cfg.customProviders) {
     for (const [name, { upstream, envVar, api: apiType }] of Object.entries(cfg.customProviders)) {
       registerProvider(api, name, {
-        baseUrl: `${GATEWAY}${walletSegment}/v1`,
+        // Custom providers can't use /provider/w/wallet/ path (no provider prefix to strip).
+        // Wallet is sent via X-Nous-Wallet header instead.
+        baseUrl: `${GATEWAY}/v1`,
         apiType: apiType || "openai-completions",
         envVars: [envVar],
         upstreamHeader: upstream,
+        walletHeader: wallet,
       });
     }
   }
@@ -75,7 +78,7 @@ export default function plugin(api: OpenClawPluginApi): void {
 function registerProvider(
   api: OpenClawPluginApi,
   providerKey: string,
-  opts: { baseUrl: string; apiType: string; envVars: string[]; upstreamHeader?: string }
+  opts: { baseUrl: string; apiType: string; envVars: string[]; upstreamHeader?: string; walletHeader?: string }
 ): void {
   const nousId = `nous-${providerKey}`;
 
@@ -123,6 +126,7 @@ function registerProvider(
           ...params.headers,
           "x-nous-user": keyHash,
           ...(opts.upstreamHeader ? { "x-nous-upstream": opts.upstreamHeader } : {}),
+          ...(opts.walletHeader ? { "x-nous-wallet": opts.walletHeader } : {}),
         };
         return inner(params);
       };

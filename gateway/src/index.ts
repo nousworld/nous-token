@@ -31,7 +31,18 @@
 
 import { PROVIDER_SHORTCUTS, extractUsage, type UsageData } from "./providers";
 import { teeStreamForUsage } from "./stream";
-import { initDB, recordUsage, getMerkleState, type Env } from "./db";
+import {
+  initDB, recordUsage, getMerkleState,
+  storeT20Receipt, getUnanchoredReceipts, storeT20Anchor,
+  isAnchorPeriodDone, getReceiptProofData,
+  type Env
+} from "./db";
+import {
+  createSignedReceipt, buildMerkleTree, submitAnchor,
+  getCurrentBlock, getAnchorPeriod, formatReceiptHeader,
+  type SignedReceipt
+} from "./token20";
+import type { Hex, Address } from "viem";
 
 let dbReady = false;
 let cachedSigningKey: CryptoKey | null = null;
@@ -54,6 +65,21 @@ async function getSigningKey(env: Env): Promise<CryptoKey | null> {
 }
 
 export default {
+  // Cron trigger: anchor Merkle roots every 10 minutes
+  async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
+    if (!dbReady) {
+      await initDB(env.DB);
+      dbReady = true;
+    }
+    const result = await handleAnchor(env);
+    if (result.anchored.length > 0) {
+      console.log(`Anchored periods: ${result.anchored.join(", ")}`);
+    }
+    if (result.errors.length > 0) {
+      console.error(`Anchor errors: ${result.errors.join("; ")}`);
+    }
+  },
+
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     if (request.method === "OPTIONS") {
       return new Response(null, { headers: corsHeaders() });
@@ -67,6 +93,15 @@ export default {
 
     // Leaderboard API (public, read-only)
     if (url.pathname.startsWith("/api/")) {
+      if (!dbReady) {
+        await initDB(env.DB);
+        dbReady = true;
+      }
+      // Token-20 endpoints
+      if (url.pathname.startsWith("/api/t20/")) {
+        const t20Response = await handleT20API(request, url, env);
+        if (t20Response) return t20Response;
+      }
       return handleAPI(request, url, env);
     }
 
@@ -79,20 +114,26 @@ export default {
     const walletQuery = (url.searchParams.get("wallet") || "").toLowerCase();
     // Path wallet extracted during routing below
 
-    // User identity: prefer X-Nous-User header (plugin pre-computes hash).
-    // Fallback: compute hash from API key / OAuth token in Authorization header.
-    // Any bearer token works — API key, OAuth token, etc.
-    let userHash = request.headers.get("x-nous-user");
-    if (!userHash || !/^[a-f0-9]{32}$/.test(userHash)) {
-      const authHeader = request.headers.get("authorization")
-        || request.headers.get("x-api-key")
-        || request.headers.get("x-goog-api-key")  // Gemini
-        || "";
-      const rawKey = authHeader.replace(/^Bearer\s+/i, "");
-      if (!rawKey) {
-        return json({ error: "Missing X-Nous-User header and no API key found. Install the nous-token plugin or set ANTHROPIC_BASE_URL." }, 401);
-      }
+    // User identity: always compute from API key when available.
+    // X-Nous-User is accepted ONLY when no API key is present (e.g. plugin stripped it).
+    // When both exist, they must match — prevents identity spoofing.
+    const authRaw = request.headers.get("authorization")
+      || request.headers.get("x-api-key")
+      || request.headers.get("x-goog-api-key")  // Gemini
+      || "";
+    const rawKey = authRaw.replace(/^Bearer\s+/i, "");
+    const claimedHash = request.headers.get("x-nous-user");
+
+    let userHash: string;
+    if (rawKey) {
       userHash = await sha256Short(rawKey);
+      if (claimedHash && claimedHash !== userHash) {
+        return json({ error: "X-Nous-User does not match API key" }, 403);
+      }
+    } else if (claimedHash && /^[a-f0-9]{32}$/.test(claimedHash)) {
+      userHash = claimedHash;
+    } else {
+      return json({ error: "Missing API key or X-Nous-User header." }, 401);
     }
 
     // Resolve upstream: shortcut prefix (e.g. /openai/v1/...) or X-Nous-Upstream header
@@ -184,9 +225,13 @@ export default {
       const [clientStream, usagePromise] = teeStreamForUsage(upstreamResponse);
 
       ctx.waitUntil(
-        usagePromise.then((usage) => {
+        usagePromise.then(async (usage) => {
           if (usage) {
-            return recordUsage(env.DB, userHash, providerName, usage, endpoint, signingKey ?? undefined, validWallet);
+            const receipt = await recordUsage(env.DB, userHash, providerName, usage, endpoint, signingKey ?? undefined, validWallet);
+            // Generate token-20 receipt if wallet is present and gateway key configured
+            if (validWallet && env.GATEWAY_PRIVATE_KEY && receipt) {
+              await generateT20Receipt(env, validWallet, usage, receipt.id);
+            }
           }
         })
       );
@@ -198,20 +243,47 @@ export default {
     } else {
       const bodyBytes = await upstreamResponse.arrayBuffer();
 
-      ctx.waitUntil(
-        (async () => {
-          try {
-            const text = new TextDecoder().decode(bodyBytes);
-            const parsed = JSON.parse(text) as Record<string, unknown>;
-            const usage = extractUsage(parsed);
-            if (usage && usage.totalTokens > 0) {
-              await recordUsage(env.DB, userHash, providerName, usage, endpoint, signingKey ?? undefined, validWallet);
+      // For non-streaming, try to attach X-Token20-Receipt header
+      let t20ReceiptHeader: string | null = null;
+
+      if (validWallet && env.GATEWAY_PRIVATE_KEY) {
+        try {
+          const text = new TextDecoder().decode(bodyBytes);
+          const parsed = JSON.parse(text) as Record<string, unknown>;
+          const usage = extractUsage(parsed);
+          if (usage && usage.totalTokens > 0) {
+            const receipt = await recordUsage(env.DB, userHash, providerName, usage, endpoint, signingKey ?? undefined, validWallet);
+            if (receipt) {
+              const signed = await generateT20Receipt(env, validWallet, usage, receipt.id);
+              if (signed) {
+                t20ReceiptHeader = formatReceiptHeader(signed);
+              }
             }
-          } catch {
-            // Not JSON or no usage — fine
           }
-        })()
-      );
+        } catch {
+          // Not JSON or no usage — fine
+        }
+      } else {
+        // No wallet or no gateway key — just record usage normally
+        ctx.waitUntil(
+          (async () => {
+            try {
+              const text = new TextDecoder().decode(bodyBytes);
+              const parsed = JSON.parse(text) as Record<string, unknown>;
+              const usage = extractUsage(parsed);
+              if (usage && usage.totalTokens > 0) {
+                await recordUsage(env.DB, userHash, providerName, usage, endpoint, signingKey ?? undefined, validWallet);
+              }
+            } catch {
+              // Not JSON or no usage — fine
+            }
+          })()
+        );
+      }
+
+      if (t20ReceiptHeader) {
+        responseHeaders.set("X-Token20-Receipt", t20ReceiptHeader);
+      }
 
       return new Response(bodyBytes, {
         status: upstreamResponse.status,
@@ -254,11 +326,11 @@ async function handleAPI(request: Request, url: URL, env: Env): Promise<Response
 
     const rows = days > 0
       ? await env.DB.prepare(
-          `SELECT model, SUM(total_tokens) as total_tokens, SUM(input_tokens) as input_tokens, SUM(output_tokens) as output_tokens, SUM(cost) as total_cost, COUNT(*) as call_count, COUNT(DISTINCT user_hash) as unique_users
+          `SELECT model, SUM(total_tokens) as total_tokens, SUM(input_tokens) as input_tokens, SUM(output_tokens) as output_tokens, SUM(cost) as total_cost, COUNT(*) as call_count, COUNT(DISTINCT CASE WHEN wallet != '' THEN wallet ELSE user_hash END) as unique_users
            FROM usage_records WHERE timestamp > ? GROUP BY model ORDER BY total_tokens DESC`
         ).bind(new Date(Date.now() - days * 86400000).toISOString()).all()
       : await env.DB.prepare(
-          `SELECT model, SUM(total_tokens) as total_tokens, SUM(input_tokens) as input_tokens, SUM(output_tokens) as output_tokens, SUM(cost) as total_cost, COUNT(*) as call_count, COUNT(DISTINCT user_hash) as unique_users
+          `SELECT model, SUM(total_tokens) as total_tokens, SUM(input_tokens) as input_tokens, SUM(output_tokens) as output_tokens, SUM(cost) as total_cost, COUNT(*) as call_count, COUNT(DISTINCT CASE WHEN wallet != '' THEN wallet ELSE user_hash END) as unique_users
            FROM usage_records GROUP BY model ORDER BY total_tokens DESC`
         ).all();
 
@@ -292,7 +364,7 @@ async function handleAPI(request: Request, url: URL, env: Env): Promise<Response
     const rows = await env.DB.prepare(
       `SELECT COUNT(*) as total_calls,
               SUM(total_tokens) as total_tokens,
-              COUNT(DISTINCT user_hash) as total_users,
+              COUNT(DISTINCT CASE WHEN wallet != '' THEN wallet ELSE user_hash END) as total_users,
               COUNT(DISTINCT model) as total_models
        FROM usage_records`
     ).all();
@@ -534,6 +606,207 @@ async function handleAPI(request: Request, url: URL, env: Env): Promise<Response
   }
 
   return json({ error: "Not found" }, 404);
+}
+
+// ── Token-20 ──
+
+async function generateT20Receipt(
+  env: Env,
+  wallet: string,
+  usage: UsageData,
+  usageRecordId: number
+): Promise<SignedReceipt | null> {
+  if (!env.GATEWAY_PRIVATE_KEY) return null;
+  try {
+    const blockNumber = await getCurrentBlock();
+    const anchorPeriod = getAnchorPeriod(blockNumber);
+    const pk = (env.GATEWAY_PRIVATE_KEY.startsWith("0x")
+      ? env.GATEWAY_PRIVATE_KEY
+      : "0x" + env.GATEWAY_PRIVATE_KEY) as Hex;
+
+    const signed = await createSignedReceipt(
+      pk,
+      wallet as Address,
+      usage.model,
+      usage.totalTokens,
+      blockNumber
+    );
+
+    await storeT20Receipt(
+      env.DB,
+      usageRecordId,
+      wallet,
+      usage.model,
+      usage.totalTokens,
+      blockNumber,
+      signed.receiptEncoded,
+      signed.receiptHash,
+      signed.signature,
+      anchorPeriod
+    );
+
+    return signed;
+  } catch (err) {
+    console.error("token-20 receipt error:", err);
+    return null;
+  }
+}
+
+/**
+ * Anchor handler: build Merkle tree for completed periods and submit to chain.
+ * Called by cron trigger every 10 minutes.
+ */
+async function handleAnchor(env: Env): Promise<{ anchored: number[]; errors: string[] }> {
+  if (!env.GATEWAY_PRIVATE_KEY) return { anchored: [], errors: ["No GATEWAY_PRIVATE_KEY"] };
+
+  const pk = (env.GATEWAY_PRIVATE_KEY.startsWith("0x")
+    ? env.GATEWAY_PRIVATE_KEY
+    : "0x" + env.GATEWAY_PRIVATE_KEY) as Hex;
+
+  const currentBlock = await getCurrentBlock();
+  const currentPeriod = getAnchorPeriod(currentBlock);
+
+  // Find all periods with receipts that haven't been anchored yet
+  const rows = await env.DB.prepare(
+    `SELECT DISTINCT anchor_period FROM t20_receipts
+     WHERE anchor_period < ?
+     AND anchor_period NOT IN (SELECT period_start FROM t20_anchors)
+     ORDER BY anchor_period ASC`
+  ).bind(currentPeriod).all();
+
+  const anchored: number[] = [];
+  const errors: string[] = [];
+
+  for (const row of rows.results as Array<{ anchor_period: number }>) {
+    const period = row.anchor_period;
+    try {
+      const receipts = await getUnanchoredReceipts(env.DB, period);
+      if (receipts.length === 0) continue;
+
+      const hashes = receipts.map(r => r.receipt_hash as Hex);
+      const { root } = buildMerkleTree(hashes);
+
+      const txHash = await submitAnchor(pk, period, root, receipts.length);
+      await storeT20Anchor(env.DB, period, root, receipts.length, txHash);
+
+      anchored.push(period);
+    } catch (err) {
+      errors.push(`Period ${period}: ${String(err)}`);
+    }
+  }
+
+  return { anchored, errors };
+}
+
+// ── Token-20 API endpoints ──
+
+async function handleT20API(request: Request, url: URL, env: Env): Promise<Response | null> {
+  // GET /api/t20/my-receipts — authenticated, returns full receipt data including signature
+  // Two auth methods:
+  //   1. Web: X-Wallet-Signature header (SIWE — user signs message with wallet)
+  //   2. CLI/SDK: X-Nous-User header (API key hash)
+  if (url.pathname === "/api/t20/my-receipts") {
+    let wallet = "";
+
+    // Auth method 1: Wallet signature (web)
+    const walletAddr = (request.headers.get("x-wallet-address") || "").toLowerCase();
+    const walletSig = request.headers.get("x-wallet-signature") || "";
+    if (walletAddr && walletSig && /^0x[a-f0-9]{40}$/.test(walletAddr)) {
+      // Verify signature: user signed the message "token-20:my-receipts:{wallet}"
+      try {
+        const { verifyMessage } = await import("viem");
+        const valid = await verifyMessage({
+          address: walletAddr as Address,
+          message: `token-20:my-receipts:${walletAddr}`,
+          signature: walletSig as Hex,
+        });
+        if (valid) wallet = walletAddr;
+      } catch { /* invalid sig */ }
+    }
+
+    // Auth method 2: API key hash (CLI/SDK)
+    if (!wallet) {
+      const userHash = request.headers.get("x-nous-user");
+      if (userHash && /^[a-f0-9]{32}$/.test(userHash)) {
+        const walletRow = await env.DB.prepare(
+          `SELECT wallet FROM usage_records WHERE user_hash = ? AND wallet != '' LIMIT 1`
+        ).bind(userHash).first<{ wallet: string }>();
+        if (walletRow) wallet = walletRow.wallet;
+      }
+    }
+
+    if (!wallet) {
+      return json({ error: "Authentication required. Provide X-Wallet-Address + X-Wallet-Signature, or X-Nous-User header." }, 401);
+    }
+
+    const rows = await env.DB.prepare(
+      `SELECT r.*, a.merkle_root, a.tx_hash as anchor_tx
+       FROM t20_receipts r
+       LEFT JOIN t20_anchors a ON r.anchor_period = a.period_start
+       WHERE r.wallet = ?
+       ORDER BY r.id DESC
+       LIMIT 100`
+    ).bind(wallet).all();
+
+    // Build Merkle proofs for anchored receipts
+    const results = [];
+    for (const row of rows.results as Array<Record<string, unknown>>) {
+      const item: Record<string, unknown> = { ...row };
+      if (row.anchor_tx && row.receipt_hash) {
+        const proofData = await getReceiptProofData(env.DB, row.receipt_hash as string);
+        if (proofData) {
+          const hashes = proofData.allHashes.map(h => h as Hex);
+          const { proofs } = buildMerkleTree(hashes);
+          item.merkle_proof = proofs.get(row.receipt_hash as Hex) || [];
+          item.period_start = proofData.anchorPeriod;
+        }
+      }
+      results.push(item);
+    }
+
+    return json({ ok: true, wallet, data: results });
+  }
+
+  // GET /api/t20/wallet/:address — receipts summary for a wallet (public, no sensitive fields)
+  const walletMatch = url.pathname.match(/^\/api\/t20\/wallet\/(0x[a-f0-9]{40})$/);
+  if (walletMatch) {
+    const addr = walletMatch[1];
+    const rows = await env.DB.prepare(
+      `SELECT r.id, r.model, r.tokens, r.block_number, r.anchor_period, r.created_at,
+              a.tx_hash as anchor_tx
+       FROM t20_receipts r
+       LEFT JOIN t20_anchors a ON r.anchor_period = a.period_start
+       WHERE r.wallet = ?
+       ORDER BY r.id DESC
+       LIMIT 100`
+    ).bind(addr).all();
+
+    return json({ ok: true, data: rows.results });
+  }
+
+  // GET /api/t20/anchors — recent anchors
+  if (url.pathname === "/api/t20/anchors") {
+    const rows = await env.DB.prepare(
+      `SELECT * FROM t20_anchors ORDER BY period_start DESC LIMIT 50`
+    ).all();
+    return json({ ok: true, data: rows.results });
+  }
+
+  // POST /api/t20/anchor — manually trigger anchor (admin only)
+  if (url.pathname === "/api/t20/anchor" && request.method === "POST") {
+    if (!env.GATEWAY_PRIVATE_KEY) {
+      return json({ error: "Not configured" }, 501);
+    }
+    const authHeader = request.headers.get("authorization") || "";
+    const token = authHeader.replace(/^Bearer\s+/i, "");
+    if (!token || token !== env.GATEWAY_PRIVATE_KEY) {
+      return json({ error: "Unauthorized" }, 401);
+    }
+    const result = await handleAnchor(env);
+    return json({ ok: true, ...result });
+  }
+
+  return null;
 }
 
 // ── Helpers ──

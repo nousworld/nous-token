@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NOUS Token — Terms of Service</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Inter', sans-serif; background: #F5F3EF; color: #1a1a1a; line-height: 1.7; }
+.container { max-width: 720px; margin: 0 auto; padding: 60px 24px; }
+h1 { font-size: 28px; font-weight: 700; margin-bottom: 8px; }
+.updated { color: #888; font-size: 14px; margin-bottom: 48px; }
+h2 { font-size: 18px; font-weight: 600; margin-top: 40px; margin-bottom: 12px; color: #2A7C6F; }
+p, li { font-size: 15px; margin-bottom: 12px; }
+ul { padding-left: 20px; }
+li { margin-bottom: 8px; }
+a { color: #2A7C6F; }
+.caps { text-transform: uppercase; font-weight: 600; }
+.back { display: inline-block; margin-bottom: 24px; color: #2A7C6F; text-decoration: none; font-size: 14px; }
+.back:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<div class="container">
+<a href="/" class="back">&larr; Back to NOUS Token</a>
+<h1>Terms of Service</h1>
+<p class="updated">Last updated: April 5, 2026</p>
+
+<h2>1. What This Service Is</h2>
+<p>NOUS Token ("the Protocol", "we", "us") operates a transparent API gateway at gateway.nousai.cc, a dashboard at token.nousai.cc, and a set of smart contracts on the Base blockchain. The Protocol provides infrastructure for recording, verifying, and inscribing AI usage data on-chain.</p>
+<p>The gateway proxies your API requests to AI providers (Anthropic, OpenAI, Google, etc.) and records usage metadata — model name, token count, and wallet address. It does not read, store, log, or retain the content of your requests or responses.</p>
+<p>The gateway signs cryptographic usage receipts, anchors Merkle roots on the Base blockchain, and enables minting of ERC-721 tokens ("Token-20 Proofs") representing verified records of AI consumption.</p>
+
+<h2>2. Nature of Token-20 Proofs</h2>
+<p class="caps">Token-20 Proofs are cryptographic records of historical AI token consumption. They are not securities, investment contracts, financial instruments, or investment products of any kind.</p>
+<p>Each Token-20 Proof represents a verified fact: that a specific quantity of AI tokens was consumed, by a specific wallet, using a specific model, at a specific block number, as signed by the gateway and anchored in a Merkle root on the Base blockchain.</p>
+<p>Token-20 Proofs:</p>
+<ul>
+<li>Record past consumption — they do not entitle holders to future income, revenue, dividends, or profits of any kind</li>
+<li>Do not represent equity, debt, ownership, or any claim on any entity's assets or earnings</li>
+<li>Do not confer governance rights over the Protocol</li>
+<li>Are not redeemable for fiat currency, cryptocurrency, or any other consideration from the Protocol</li>
+<li>May have no monetary value and should not be acquired with an expectation of profit</li>
+</ul>
+
+<h2>3. Fee Structure</h2>
+<p>The Protocol charges the following fees, denominated in USDC:</p>
+<ul>
+<li><strong>Series Deployment Fee:</strong> A fixed fee paid to the Protocol when a Series Creator deploys a new Series. This is a one-time infrastructure fee for on-chain deployment.</li>
+<li><strong>Protocol Fee:</strong> A fixed fee of 1 USDC per inscription, paid to the Protocol. This is a flat service fee for cryptographic signing, Merkle anchoring, and on-chain verification infrastructure.</li>
+<li><strong>Creator Fee:</strong> An amount set independently by the Series Creator, paid entirely and directly to the Series Creator. The Protocol does not receive any portion of the Creator Fee. The Creator Fee is a transaction between you and the Series Creator — the Protocol is not a party to that transaction.</li>
+</ul>
+<p>All fees are collected via USDC through ERC-3009 (transferWithAuthorization) at the time of inscription. The Protocol does not custody, pool, or hold user funds at any point.</p>
+
+<h2>4. Series and Series Creators</h2>
+<p>A "Series" is a collection of Token-20 Proofs organized around a specific theme, model, or purpose, deployed by an independent "Series Creator."</p>
+<p class="caps">Series Creators are independent third parties. They are not employees, agents, partners, or affiliates of the Protocol. The Protocol does not control, endorse, verify, or take responsibility for any Series Creator's pricing, marketing, communications, promises, products, or services.</p>
+<p>By deploying a Series, each Series Creator acknowledges and agrees that:</p>
+<ul>
+<li>They are solely responsible for setting their Creator Fee and for the value proposition they offer to inscribers</li>
+<li>They will not market, promote, or describe their Series as an investment opportunity, a security, or a vehicle for financial returns</li>
+<li>They will not promise, imply, or suggest that inscribing their Series will generate profits, income, airdrops, revenue sharing, or any form of financial return</li>
+<li>Any products, services, access, or benefits they independently choose to provide to inscribers are their own business decisions, governed by their own terms, and entirely separate from the Protocol</li>
+<li>They are solely responsible for compliance with all applicable laws and regulations in their jurisdiction, including but not limited to securities laws, consumer protection laws, and tax obligations</li>
+<li>The Protocol may remove, delist, or restrict any Series that violates these terms or that the Protocol reasonably believes poses legal or reputational risk</li>
+</ul>
+<p>By inscribing a Series, each inscriber acknowledges that:</p>
+<ul>
+<li>The Creator Fee is paid to the Series Creator, not to the Protocol</li>
+<li>The Protocol makes no representations about the Series Creator or the value of any Series</li>
+<li>Any relationship, expectation, or agreement between the inscriber and the Series Creator is independent of the Protocol</li>
+<li>Inscription is a consumption activity — a payment for a cryptographic record — not an investment activity</li>
+</ul>
+
+<h2>5. You Bring Your Own API Key</h2>
+<p>We do not sell, provide, or manage API keys. You must have your own valid API key from the AI provider you wish to use. Your API key is hashed for pseudonymous identification — we never store your key in plaintext.</p>
+<p>You are responsible for:</p>
+<ul>
+<li>Keeping your API key secure</li>
+<li>Complying with the AI provider's terms of service</li>
+<li>All costs charged by the AI provider for your usage</li>
+<li>Any consequences of routing your API calls through a third-party proxy</li>
+</ul>
+
+<h2>6. Privacy by Structure</h2>
+<p>The gateway pipes request and response bodies directly between you and the AI provider. It does not parse, store, or log conversation content. This is verifiable by auditing the <a href="https://github.com/nousworld/nous-token" target="_blank">open-source code</a>.</p>
+<p>What we do record:</p>
+<ul>
+<li>Hashed API key (a one-way fingerprint of your key used as your anonymous ID — we never store your actual key)</li>
+<li>Model name</li>
+<li>Token count (as reported by the AI provider)</li>
+<li>Wallet address (if you provided one)</li>
+</ul>
+<p>This usage data is publicly queryable via the dashboard and API. By using the gateway, you consent to your usage metadata being visible on the leaderboard and through the API.</p>
+
+<h2>7. Wallet Binding</h2>
+<p>When you associate a wallet address with your usage, this binding is recorded and may be difficult or impossible to change. Verify your wallet address carefully before binding. We are not responsible for usage attributed to an incorrect wallet address.</p>
+
+<h2>8. Blockchain Interactions</h2>
+<p>The service enables optional on-chain operations on the Base network (Layer 2 on Ethereum), including storing usage proofs and minting ERC-721 tokens. By initiating any on-chain transaction, you acknowledge:</p>
+<ul>
+<li>Blockchain transactions are irreversible</li>
+<li>You are responsible for all gas costs</li>
+<li>Smart contracts may contain bugs despite auditing</li>
+<li>We do not control the Base network, Ethereum, or any blockchain protocol</li>
+<li>We are not a custodian — we never have access to your wallet, private keys, or funds</li>
+</ul>
+
+<h2>9. Receipt Accuracy</h2>
+<p>Usage receipts reflect the token counts reported by the AI provider in their API response. We sign what the provider reports — we do not independently count tokens. If a provider reports incorrect token counts, the receipt will reflect that inaccuracy. We are not responsible for discrepancies in provider-reported usage data.</p>
+
+<h2>10. Third-Party Services</h2>
+<p>The gateway proxies requests to third-party AI providers. We are not affiliated with, endorsed by, or responsible for these providers. We do not guarantee their availability, accuracy, or compliance with any regulations. If a provider changes their terms, restricts proxy usage, or revokes your API key, that is between you and the provider.</p>
+
+<h2>11. No Warranty</h2>
+<p class="caps">The service is provided "as is" and "as available" without warranties of any kind, express or implied, including but not limited to warranties of merchantability, fitness for a particular purpose, accuracy, or non-infringement. We do not guarantee that the service will be uninterrupted, error-free, or secure.</p>
+
+<h2>12. Limitation of Liability</h2>
+<p class="caps">To the maximum extent permitted by law, we shall not be liable for any indirect, incidental, special, consequential, or punitive damages, or any loss of profits, data, or goodwill, arising from your use of the service. Our total liability for any claim shall not exceed the amount of Protocol Fees you have paid in the twelve (12) months preceding the claim, or $100 USD, whichever is greater.</p>
+
+<h2>13. Assumption of Risk</h2>
+<p>You acknowledge that:</p>
+<ul>
+<li>Cryptocurrency and blockchain technology involve inherent risks</li>
+<li>Token-20 Proofs may have no monetary value and you should not expect them to appreciate in value</li>
+<li>The regulatory status of blockchain-based records may change and such changes may adversely affect the utility of Token-20 Proofs</li>
+<li>Open-source software may contain undiscovered vulnerabilities</li>
+<li>You are technically sophisticated enough to understand these risks</li>
+<li>You have not relied on any statement by the Protocol or any Series Creator as investment advice</li>
+</ul>
+
+<h2>14. Prohibited Use</h2>
+<p>You may not use the service to:</p>
+<ul>
+<li>Violate any applicable law or regulation</li>
+<li>Generate illegal content through AI providers</li>
+<li>Interfere with the operation of the gateway or blockchain</li>
+<li>Misrepresent your identity or wallet ownership</li>
+<li>Attempt to manipulate usage data, receipts, or Merkle proofs</li>
+<li>Market, promote, or sell Token-20 Proofs as investment products or securities</li>
+<li>Promise or imply financial returns to prospective inscribers of any Series</li>
+</ul>
+
+<h2>15. Modification</h2>
+<p>We may update these terms at any time. Continued use of the service after changes constitutes acceptance. Material changes will be noted by updating the date at the top of this page.</p>
+
+<h2>16. Severability</h2>
+<p>If any provision of these terms is found to be unenforceable, the remaining provisions shall continue in full force and effect.</p>
+
+<h2>17. Governing Law</h2>
+<p>These terms shall be governed by the laws of the jurisdiction in which the service operator is incorporated, without regard to conflict of law principles.</p>
+
+<h2>18. Contact</h2>
+<p>Questions about these terms: <a href="https://github.com/nousworld/nous-token" target="_blank">github.com/nousworld/nous-token</a></p>
+
+</div>
+</body>
+</html>

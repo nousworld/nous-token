@@ -23,6 +23,7 @@ const walletCache = new Map<string, string>();
 export interface Env {
   DB: D1Database;
   SIGNING_KEY?: string;
+  GATEWAY_PRIVATE_KEY?: string;  // secp256k1 hex for token-20 Ethereum signing
 }
 
 export interface Receipt {
@@ -70,6 +71,33 @@ export async function initDB(db: D1Database): Promise<void> {
   try { await db.exec(`ALTER TABLE usage_records ADD COLUMN cost REAL NOT NULL DEFAULT 0`); } catch { /* exists */ }
   try { await db.exec(`ALTER TABLE usage_records ADD COLUMN wallet TEXT NOT NULL DEFAULT ''`); } catch { /* exists */ }
   try { await db.exec(`CREATE INDEX IF NOT EXISTS idx_usage_wallet ON usage_records(wallet)`); } catch { /* exists */ }
+
+  // token-20 receipt storage
+  await db.batch([
+    db.prepare(`CREATE TABLE IF NOT EXISTS t20_receipts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      usage_record_id INTEGER NOT NULL,
+      wallet TEXT NOT NULL,
+      model TEXT NOT NULL,
+      tokens INTEGER NOT NULL,
+      block_number INTEGER NOT NULL,
+      receipt_encoded TEXT NOT NULL,
+      receipt_hash TEXT NOT NULL,
+      signature TEXT NOT NULL,
+      anchor_period INTEGER NOT NULL,
+      created_at TEXT NOT NULL
+    )`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_t20_wallet ON t20_receipts(wallet)`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_t20_period ON t20_receipts(anchor_period)`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_t20_hash ON t20_receipts(receipt_hash)`),
+    db.prepare(`CREATE TABLE IF NOT EXISTS t20_anchors (
+      period_start INTEGER PRIMARY KEY,
+      merkle_root TEXT NOT NULL,
+      receipt_count INTEGER NOT NULL,
+      tx_hash TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL
+    )`),
+  ]);
 }
 
 export async function recordUsage(
@@ -218,7 +246,9 @@ async function appendToMMR(db: D1Database, leafHash: string): Promise<void> {
     // else: concurrent write detected, retry with fresh state
   }
   // After 3 retries, the leaf is in usage_records but MMR may be stale.
-  // Sentinel will detect the mismatch; next successful append will fix the count.
+  // Next successful append will re-read leaf_count and continue from there.
+  // Log so we can monitor frequency — if this fires often, we need a queue.
+  console.error(`[MMR] optimistic lock failed after 3 retries for leaf ${leafHash.slice(0, 16)}`);
 }
 
 /** Get current Merkle root and stats */
@@ -239,6 +269,79 @@ export async function getMerkleState(db: D1Database): Promise<{
     merkle_root: state.merkle_root,
     leaf_count: state.leaf_count,
     peaks: JSON.parse(state.peaks),
+  };
+}
+
+// ── Token-20 Receipt Storage ──
+
+export async function storeT20Receipt(
+  db: D1Database,
+  usageRecordId: number,
+  wallet: string,
+  model: string,
+  tokens: number,
+  blockNumber: number,
+  receiptEncoded: string,
+  receiptHash: string,
+  signature: string,
+  anchorPeriod: number
+): Promise<void> {
+  await db.prepare(
+    `INSERT INTO t20_receipts (usage_record_id, wallet, model, tokens, block_number, receipt_encoded, receipt_hash, signature, anchor_period, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).bind(
+    usageRecordId, wallet, model, tokens, blockNumber,
+    receiptEncoded, receiptHash, signature, anchorPeriod,
+    new Date().toISOString()
+  ).run();
+}
+
+export async function getUnanchoredReceipts(
+  db: D1Database,
+  anchorPeriod: number
+): Promise<Array<{ receipt_hash: string; id: number }>> {
+  const rows = await db.prepare(
+    `SELECT id, receipt_hash FROM t20_receipts WHERE anchor_period = ? ORDER BY id ASC`
+  ).bind(anchorPeriod).all();
+  return rows.results as Array<{ receipt_hash: string; id: number }>;
+}
+
+export async function storeT20Anchor(
+  db: D1Database,
+  periodStart: number,
+  merkleRoot: string,
+  receiptCount: number,
+  txHash: string
+): Promise<void> {
+  await db.prepare(
+    `INSERT OR REPLACE INTO t20_anchors (period_start, merkle_root, receipt_count, tx_hash, created_at)
+     VALUES (?, ?, ?, ?, ?)`
+  ).bind(periodStart, merkleRoot, receiptCount, txHash, new Date().toISOString()).run();
+}
+
+export async function isAnchorPeriodDone(db: D1Database, periodStart: number): Promise<boolean> {
+  const row = await db.prepare(
+    `SELECT 1 FROM t20_anchors WHERE period_start = ?`
+  ).bind(periodStart).first();
+  return !!row;
+}
+
+export async function getReceiptProofData(
+  db: D1Database,
+  receiptHash: string
+): Promise<{ anchorPeriod: number; allHashes: string[] } | null> {
+  const receipt = await db.prepare(
+    `SELECT anchor_period FROM t20_receipts WHERE receipt_hash = ?`
+  ).bind(receiptHash).first<{ anchor_period: number }>();
+  if (!receipt) return null;
+
+  const rows = await db.prepare(
+    `SELECT receipt_hash FROM t20_receipts WHERE anchor_period = ? ORDER BY id ASC`
+  ).bind(receipt.anchor_period).all();
+
+  return {
+    anchorPeriod: receipt.anchor_period,
+    allHashes: (rows.results as Array<{ receipt_hash: string }>).map(r => r.receipt_hash),
   };
 }
 

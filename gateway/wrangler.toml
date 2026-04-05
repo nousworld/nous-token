@@ -11,3 +11,11 @@ database_id = "a4ac5435-5ad5-4f34-9c5a-112fe96e504d"
 # SIGNING_KEY: ECDSA P-256 private key in JWK format, stored as Worker secret.
 # Generate: node -e "crypto.subtle.generateKey({name:'ECDSA',namedCurve:'P-256'},true,['sign','verify']).then(k=>crypto.subtle.exportKey('jwk',k.privateKey)).then(j=>console.log(JSON.stringify(j)))"
 # Set: wrangler secret put SIGNING_KEY
+
+# GATEWAY_PRIVATE_KEY: secp256k1 hex for token-20 Ethereum signing
+# This is the gateway identity on-chain. Must be registered in the Token20 contract.
+# Set: wrangler secret put GATEWAY_PRIVATE_KEY
+
+# Anchor cron: submit Merkle roots every 10 minutes
+[triggers]
+crons = ["*/10 * * * *"]

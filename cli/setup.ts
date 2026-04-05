@@ -240,7 +240,8 @@ if (configured > 0) {
   console.log("  \x1b[1mAll terminals (permanent):\x1b[0m");
   const shell = process.env.SHELL || "/bin/bash";
   const rcFile = shell.includes("zsh") ? "~/.zshrc" : "~/.bashrc";
-  console.log(`  \x1b[36mecho '${cmds.join("\\n")}' >> ${rcFile} && source ${rcFile}\x1b[0m\n`);
+  const echoCmd = cmds.map(c => `echo '${c}' >> ${rcFile}`).join(" && ");
+  console.log(`  \x1b[36m${echoCmd} && source ${rcFile}\x1b[0m\n`);
   console.log(`  See your usage at \x1b[4mhttps://token.nousai.cc\x1b[0m`);
 } else {
   console.log("  No AI tools found. Install Claude Code, Cursor, or any OpenAI-compatible tool.");
