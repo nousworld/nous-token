@@ -2,7 +2,7 @@
   "id": "nous-token",
   "name": "nous-token",
   "description": "Track your AI usage on the global leaderboard. Routes LLM calls through the nous-token gateway to record real token consumption. Supports 11 providers out of the box + unlimited custom providers. No prompt or response content is stored.",
-  "version": "0.2.0",
+  "version": "0.3.4",
   "kind": "provider",
   "providers": [
     "nous-openai", "nous-anthropic", "nous-deepseek", "nous-google",

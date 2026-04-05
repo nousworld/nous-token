@@ -72,8 +72,8 @@ contract Token20 is ERC721, Ownable, Pausable {
     IERC20WithAuth public immutable usdc;
 
     uint256 public deployFee = 5_000000;          // 5 USDC
-    uint256 public minInscriptionFee = 100000;    // 0.1 USDC
-    uint256 public constant PROTOCOL_BASE_FEE = 100000;  // 0.1 USDC
+    uint256 public minInscriptionFee = 1_000000;   // 1 USDC (= protocol fee)
+    uint256 public constant PROTOCOL_FEE = 1_000000;     // 1 USDC fixed
     uint256 public anchorInterval = 300;          // ~10 min on Base
 
     uint256 private _nextTokenId = 1;
@@ -183,7 +183,10 @@ contract Token20 is ERC721, Ownable, Pausable {
         require(_isSafeString(name), "Name: unsafe characters");
         bytes32 nameHash = keccak256(nameBytes);
         require(!nameExists[nameHash], "Name taken");
-        if (bytes(modelId).length > 0) require(_isSafeString(modelId), "ModelId: unsafe characters");
+        if (bytes(modelId).length > 0) {
+            require(bytes(modelId).length <= 64, "ModelId: too long");
+            require(_isSafeString(modelId), "ModelId: unsafe characters");
+        }
         require(maxSupply > 0, "maxSupply must be > 0");
         require(mintThreshold > 0, "mintThreshold must be > 0");
         require(inscriptionFee >= minInscriptionFee, "Fee below minimum");
@@ -306,13 +309,10 @@ contract Token20 is ERC721, Ownable, Pausable {
     }
 
     function _splitFee(uint256 fee, address creator) internal {
-        if (fee > PROTOCOL_BASE_FEE) {
-            uint256 premium = fee - PROTOCOL_BASE_FEE;
-            uint256 creatorShare = premium / 2;
-            if (creatorShare > 0) {
-                creatorBalance[creator] += creatorShare;
-                totalPendingCreatorFees += creatorShare;
-            }
+        if (fee > PROTOCOL_FEE) {
+            uint256 creatorShare = fee - PROTOCOL_FEE;
+            creatorBalance[creator] += creatorShare;
+            totalPendingCreatorFees += creatorShare;
         }
     }
 

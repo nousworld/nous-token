@@ -21,7 +21,7 @@ function loadWallet(): string {
 }
 
 function saveWallet(wallet: string): void {
-  writeFileSync(NOUS_CONFIG, wallet);
+  writeFileSync(NOUS_CONFIG, wallet, { mode: 0o600 });
 }
 
 function gatewayUrl(provider: string, apiPath: string, wallet: string): string {

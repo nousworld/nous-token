@@ -158,9 +158,19 @@ export default {
       }
       apiPath = "/" + restParts.join("/");
     } else if (customUpstream) {
-      // Custom upstream via header: any URL
+      // Custom upstream via header: validated URL (HTTPS only, no internal IPs)
       try {
         const parsed = new URL(customUpstream);
+        if (parsed.protocol !== "https:") {
+          return json({ error: "X-Nous-Upstream must use HTTPS" }, 400);
+        }
+        // Block obvious internal/private ranges
+        const host = parsed.hostname;
+        if (host === "localhost" || host === "127.0.0.1" || host === "0.0.0.0"
+          || host.startsWith("10.") || host.startsWith("192.168.") || host.startsWith("172.")
+          || host.endsWith(".local") || host.endsWith(".internal")) {
+          return json({ error: "X-Nous-Upstream cannot target internal addresses" }, 400);
+        }
         upstreamBase = parsed.origin;
         providerName = parsed.hostname.split(".")[1] || parsed.hostname.split(".")[0] || "custom";
         // Full path from the request (no prefix stripping)
@@ -797,9 +807,13 @@ async function handleT20API(request: Request, url: URL, env: Env): Promise<Respo
     if (!env.GATEWAY_PRIVATE_KEY) {
       return json({ error: "Not configured" }, 501);
     }
+    const adminSecret = (env as Record<string, unknown>).ADMIN_SECRET as string | undefined;
+    if (!adminSecret) {
+      return json({ error: "ADMIN_SECRET not configured" }, 501);
+    }
     const authHeader = request.headers.get("authorization") || "";
     const token = authHeader.replace(/^Bearer\s+/i, "");
-    if (!token || token !== env.GATEWAY_PRIVATE_KEY) {
+    if (!token || token !== adminSecret) {
       return json({ error: "Unauthorized" }, 401);
     }
     const result = await handleAnchor(env);
