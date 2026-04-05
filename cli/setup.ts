@@ -156,10 +156,10 @@ const tools: Tool[] = [
 // ── Shell env helper ──
 
 // Collect env vars to set — don't write to shell rc file
-const envCommands: string[] = [];
+const envCommands: Map<string, string> = new Map();
 
 function setShellEnv(key: string, value: string, toolName: string): ConfigResult {
-  envCommands.push(`export ${key}="${value}"`);
+  envCommands.set(key, `export ${key}="${value}"`);
   return { success: true, message: `${key}` };
 }
 
@@ -233,13 +233,14 @@ for (const tool of tools) {
 console.log("");
 
 if (configured > 0) {
+  const cmds = [...envCommands.values()];
   console.log(`  \x1b[32m${configured} tool(s) detected.\x1b[0m\n`);
   console.log("  \x1b[1mThis terminal only:\x1b[0m");
-  console.log(`  \x1b[36m${envCommands.join(" && ")}\x1b[0m\n`);
+  console.log(`  \x1b[36m${cmds.join(" && ")}\x1b[0m\n`);
   console.log("  \x1b[1mAll terminals (permanent):\x1b[0m");
   const shell = process.env.SHELL || "/bin/bash";
   const rcFile = shell.includes("zsh") ? "~/.zshrc" : "~/.bashrc";
-  console.log(`  \x1b[36mecho '${envCommands.join("\\n")}' >> ${rcFile} && source ${rcFile}\x1b[0m\n`);
+  console.log(`  \x1b[36mecho '${cmds.join("\\n")}' >> ${rcFile} && source ${rcFile}\x1b[0m\n`);
   console.log(`  See your usage at \x1b[4mhttps://token.nousai.cc\x1b[0m`);
 } else {
   console.log("  No AI tools found. Install Claude Code, Cursor, or any OpenAI-compatible tool.");
