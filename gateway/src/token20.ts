@@ -195,6 +195,24 @@ export function getAnchorPeriod(blockNumber: number): number {
   return Math.floor(blockNumber / ANCHOR_INTERVAL) * ANCHOR_INTERVAL;
 }
 
+/**
+ * Check if an anchor exists on-chain. Returns the merkle root (bytes32).
+ * Zero bytes32 = not anchored. Throws on RPC error.
+ */
+export async function checkAnchorOnChain(periodStart: number): Promise<Hex> {
+  const client = createPublicClient({
+    chain: base,
+    transport: http(BASE_RPC),
+  });
+  const result = await client.readContract({
+    address: TOKEN20_ADDRESS,
+    abi: [{ name: "anchors", type: "function", inputs: [{ name: "", type: "uint256" }], outputs: [{ name: "", type: "bytes32" }], stateMutability: "view" }] as const,
+    functionName: "anchors",
+    args: [BigInt(periodStart)],
+  });
+  return result as Hex;
+}
+
 // ─── Receipt Header ───
 
 /**

@@ -35,11 +35,13 @@ import {
   initDB, recordUsage, getMerkleState,
   storeT20Receipt, getUnanchoredReceipts, storeT20Anchor,
   isAnchorPeriodDone, getReceiptProofData,
+  getUnverifiedAnchors, markAnchorVerified, deleteFailedAnchor,
   type Env
 } from "./db";
 import {
   createSignedReceipt, buildMerkleTree, submitAnchor,
   getCurrentBlock, getAnchorPeriod, formatReceiptHeader,
+  checkAnchorOnChain,
   type SignedReceipt
 } from "./token20";
 import { verifyMessage } from "viem";
@@ -774,6 +776,24 @@ async function handleAnchor(env: Env): Promise<{ anchored: number[]; errors: str
       anchored.push(period);
     } catch (err) {
       errors.push(`Period ${period}: ${String(err)}`);
+    }
+  }
+
+  // Verify past anchors: check on-chain state for unverified records older than 5 minutes
+  const unverified = await getUnverifiedAnchors(env.DB);
+  for (const a of unverified) {
+    try {
+      const onChainRoot = await checkAnchorOnChain(a.period_start);
+      const zeroRoot = "0x" + "0".repeat(64);
+      if (onChainRoot === zeroRoot) {
+        // Not on chain — tx failed, delete so next cron retries
+        await deleteFailedAnchor(env.DB, a.period_start);
+        errors.push(`Period ${a.period_start}: tx ${a.tx_hash} not on chain, will retry`);
+      } else {
+        await markAnchorVerified(env.DB, a.period_start);
+      }
+    } catch {
+      // RPC error — skip, try next cron cycle
     }
   }
 

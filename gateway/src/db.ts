@@ -95,9 +95,12 @@ export async function initDB(db: D1Database): Promise<void> {
       merkle_root TEXT NOT NULL,
       receipt_count INTEGER NOT NULL,
       tx_hash TEXT NOT NULL DEFAULT '',
-      created_at TEXT NOT NULL
+      created_at TEXT NOT NULL,
+      verified INTEGER NOT NULL DEFAULT 0
     )`),
   ]);
+  // Migrations for t20_anchors
+  try { await db.exec(`ALTER TABLE t20_anchors ADD COLUMN verified INTEGER NOT NULL DEFAULT 0`); } catch { /* exists */ }
 }
 
 export async function recordUsage(
@@ -311,6 +314,32 @@ export async function isAnchorPeriodDone(db: D1Database, periodStart: number): P
     `SELECT 1 FROM t20_anchors WHERE period_start = ?`
   ).bind(periodStart).first();
   return !!row;
+}
+
+export async function getUnverifiedAnchors(
+  db: D1Database,
+  graceMinutes = 5
+): Promise<Array<{ period_start: number; tx_hash: string }>> {
+  const rows = await db.prepare(
+    `SELECT period_start, tx_hash FROM t20_anchors
+     WHERE verified = 0
+     AND created_at < datetime('now', '-' || ? || ' minutes')
+     ORDER BY period_start ASC
+     LIMIT 20`
+  ).bind(graceMinutes).all();
+  return rows.results as Array<{ period_start: number; tx_hash: string }>;
+}
+
+export async function markAnchorVerified(db: D1Database, periodStart: number): Promise<void> {
+  await db.prepare(
+    `UPDATE t20_anchors SET verified = 1 WHERE period_start = ?`
+  ).bind(periodStart).run();
+}
+
+export async function deleteFailedAnchor(db: D1Database, periodStart: number): Promise<void> {
+  await db.prepare(
+    `DELETE FROM t20_anchors WHERE period_start = ?`
+  ).bind(periodStart).run();
 }
 
 export async function getReceiptProofData(
