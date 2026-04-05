@@ -42,6 +42,7 @@ import {
   getCurrentBlock, getAnchorPeriod, formatReceiptHeader,
   type SignedReceipt
 } from "./token20";
+import { verifyMessage } from "viem";
 import type { Hex, Address } from "viem";
 
 let dbReady = false;
@@ -619,6 +620,66 @@ async function handleAPI(request: Request, url: URL, env: Env): Promise<Response
       return json({ ok: true, algorithm: "ECDSA-P256-SHA256", pubkey });
     } catch {
       return json({ error: "Key error" }, 500);
+    }
+  }
+
+  // POST /api/bind-wallet — cryptographic wallet binding with signature verification
+  // User signs "nous-token:bind:{wallet}" with their wallet, proving ownership.
+  if (url.pathname === "/api/bind-wallet" && request.method === "POST") {
+    const callerHash = request.headers.get("x-nous-user");
+    if (!callerHash || !/^[a-f0-9]{32}$/.test(callerHash)) {
+      return json({ error: "X-Nous-User header required" }, 401);
+    }
+
+    try {
+      const body = await request.json() as { wallet?: string; signature?: string };
+      const wallet = (body.wallet || "").toLowerCase();
+      const signature = body.signature || "";
+
+      if (!wallet || !/^0x[a-f0-9]{40}$/.test(wallet)) {
+        return json({ error: "Invalid wallet address" }, 400);
+      }
+      if (!signature) {
+        return json({ error: "Signature required" }, 400);
+      }
+
+      // Verify the wallet owner signed the binding message
+      const message = `nous-token:bind:${wallet}`;
+      const valid = await verifyMessage({
+        address: wallet as Address,
+        message,
+        signature: signature as Hex,
+      });
+      if (!valid) {
+        return json({ error: "Invalid signature — wallet ownership not proven" }, 403);
+      }
+
+      // Check current binding
+      const existing = await env.DB.prepare(
+        `SELECT wallet FROM usage_records WHERE user_hash = ? AND wallet != '' ORDER BY id DESC LIMIT 1`
+      ).bind(callerHash).first<{ wallet: string }>();
+
+      const oldWallet = existing?.wallet || "";
+
+      if (oldWallet === wallet) {
+        return json({ ok: true, message: "Already bound", wallet });
+      }
+
+      // Backfill only records with no wallet (first bind),
+      // or leave old records on old wallet (rebind — new records go to new wallet)
+      if (!oldWallet) {
+        await env.DB.prepare(
+          `UPDATE usage_records SET wallet = ? WHERE user_hash = ? AND wallet = ''`
+        ).bind(wallet, callerHash).run();
+      }
+
+      // Update cache so new records use new wallet
+      walletCache.set(callerHash, wallet);
+
+      const msg = oldWallet ? `Rebound from ${oldWallet.slice(0,6)}...${oldWallet.slice(-4)}` : "Wallet bound";
+      return json({ ok: true, message: msg, wallet, previous: oldWallet || undefined });
+    } catch (err) {
+      return json({ error: "Bind failed: " + String(err) }, 500);
     }
   }
 

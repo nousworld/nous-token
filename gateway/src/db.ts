@@ -140,21 +140,20 @@ export async function recordUsage(
       .join("");
   }
 
-  // Resolve wallet: use request wallet if provided, otherwise fall back to previously bound wallet
-  let resolvedWallet = wallet || "";
+  // Resolve wallet: look up verified binding only.
+  // Wallet binding requires cryptographic proof via POST /api/bind-wallet.
+  // Request-level wallet params are used for routing only, not for binding.
+  let resolvedWallet = "";
   const cached = walletCache.get(userHash);
 
-  if (!resolvedWallet) {
-    // No wallet in this request — use cached/stored wallet
-    if (cached !== undefined) {
-      resolvedWallet = cached;
-    } else {
-      const existing = await db.prepare(
-        `SELECT wallet FROM usage_records WHERE user_hash = ? AND wallet != '' LIMIT 1`
-      ).bind(userHash).first<{ wallet: string }>();
-      resolvedWallet = existing?.wallet || "";
-      walletCache.set(userHash, resolvedWallet);
-    }
+  if (cached !== undefined) {
+    resolvedWallet = cached;
+  } else {
+    const existing = await db.prepare(
+      `SELECT wallet FROM usage_records WHERE user_hash = ? AND wallet != '' ORDER BY id DESC LIMIT 1`
+    ).bind(userHash).first<{ wallet: string }>();
+    resolvedWallet = existing?.wallet || "";
+    walletCache.set(userHash, resolvedWallet);
   }
 
   // Insert record with the resolved wallet
@@ -180,18 +179,6 @@ export async function recordUsage(
       resolvedWallet
     )
     .run();
-
-  // Update cache and backfill empty records on first binding
-  if (resolvedWallet) {
-    const prevWallet = cached !== undefined ? cached : "";
-    walletCache.set(userHash, resolvedWallet);
-    // Only backfill records with no wallet — don't touch records already bound to another wallet
-    if (!prevWallet) {
-      await db.prepare(
-        `UPDATE usage_records SET wallet = ? WHERE user_hash = ? AND wallet = ''`
-      ).bind(resolvedWallet, userHash).run();
-    }
-  }
 
   // Update MMR
   await appendToMMR(db, leafHash);
