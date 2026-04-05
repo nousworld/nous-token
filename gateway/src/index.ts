@@ -498,17 +498,24 @@ async function handleAPI(request: Request, url: URL, env: Env): Promise<Response
   }
 
   // POST /api/sign — gateway signs a user's usage summary for on-chain proof
-  // Optional convenience: aggregates receipts into a signed summary.
-  // Individual receipts (via /api/user/:hash/receipts) are already signed per-call.
+  // Requires X-Nous-User header matching the requested user_hash.
   if (url.pathname === "/api/sign" && request.method === "POST") {
     if (!env.SIGNING_KEY) {
       return json({ error: "Signing not configured" }, 501);
     }
 
+    const callerHash = request.headers.get("x-nous-user");
+    if (!callerHash || !/^[a-f0-9]{32}$/.test(callerHash)) {
+      return json({ error: "X-Nous-User header required" }, 401);
+    }
+
     try {
       const body = await request.json() as { user_hash?: string; receipt_ids?: number[] };
-      const userHash = body.user_hash;
-      if (!userHash || !/^[a-f0-9]{32}$/.test(userHash)) {
+      const userHash = body.user_hash || callerHash;
+      if (userHash !== callerHash) {
+        return json({ error: "Can only sign your own usage" }, 403);
+      }
+      if (!/^[a-f0-9]{32}$/.test(userHash)) {
         return json({ error: "Invalid user_hash" }, 400);
       }
 
