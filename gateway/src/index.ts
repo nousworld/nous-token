@@ -83,7 +83,7 @@ export default {
 
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     if (request.method === "OPTIONS") {
-      return new Response(null, { headers: corsHeaders() });
+      return new Response(null, { headers: corsHeaders(request) });
     }
 
     const url = new URL(request.url);
@@ -211,11 +211,11 @@ export default {
         body: request.body,
       });
     } catch (err) {
-      return json({ error: "Failed to reach provider: " + String(err) }, 502);
+      return json({ error: "Failed to reach provider" }, 502);
     }
 
     const responseHeaders = new Headers(upstreamResponse.headers);
-    for (const [k, v] of Object.entries(corsHeaders())) {
+    for (const [k, v] of Object.entries(corsHeaders(request))) {
       responseHeaders.set(k, v);
     }
     // Resolve wallet from header, query, or path (in priority order)
@@ -276,7 +276,7 @@ export default {
             }
           }
         } catch {
-          // Not JSON or no usage — fine
+          // Non-JSON response or no usage data — expected for non-chat endpoints
         }
       } else {
         // No wallet or no gateway key — just record usage normally
@@ -290,7 +290,7 @@ export default {
                 await recordUsage(env.DB, userHash, providerName, usage, endpoint, signingKey ?? undefined, validWallet);
               }
             } catch {
-              // Not JSON or no usage — fine
+              // Non-JSON response or no usage data — expected for non-chat endpoints
             }
           })()
         );
@@ -318,8 +318,8 @@ async function handleAPI(request: Request, url: URL, env: Env): Promise<Response
 
   // GET /api/leaderboard — top users by total tokens
   if (url.pathname === "/api/leaderboard") {
-    const days = parseInt(url.searchParams.get("days") || "30");
-    const limit = Math.min(parseInt(url.searchParams.get("limit") || "100"), 500);
+    const days = safeInt(url.searchParams.get("days"), 30);
+    const limit = Math.min(safeInt(url.searchParams.get("limit"), 100), 500);
     const idExpr = `CASE WHEN wallet != '' THEN wallet ELSE user_hash END`;
 
     const rows = days > 0
@@ -337,7 +337,7 @@ async function handleAPI(request: Request, url: URL, env: Env): Promise<Response
 
   // GET /api/models — usage breakdown by model (aggregated across providers)
   if (url.pathname === "/api/models") {
-    const days = parseInt(url.searchParams.get("days") || "30");
+    const days = safeInt(url.searchParams.get("days"), 30);
 
     const rows = days > 0
       ? await env.DB.prepare(
@@ -355,8 +355,8 @@ async function handleAPI(request: Request, url: URL, env: Env): Promise<Response
   // GET /api/leaderboard/model — top users for a specific model (across all providers)
   if (url.pathname === "/api/leaderboard/model") {
     const model = url.searchParams.get("model") || "";
-    const days = parseInt(url.searchParams.get("days") || "30");
-    const limit = Math.min(parseInt(url.searchParams.get("limit") || "100"), 500);
+    const days = safeInt(url.searchParams.get("days"), 30);
+    const limit = Math.min(safeInt(url.searchParams.get("limit"), 100), 500);
     const idExpr = `CASE WHEN wallet != '' THEN wallet ELSE user_hash END`;
 
     if (!model) return json({ error: "model parameter required" }, 400);
@@ -432,8 +432,8 @@ async function handleAPI(request: Request, url: URL, env: Env): Promise<Response
   const receiptsMatch = url.pathname.match(/^\/api\/user\/([a-f0-9]+)\/receipts$/);
   if (receiptsMatch) {
     const hash = receiptsMatch[1];
-    const afterId = parseInt(url.searchParams.get("after") || "0");
-    const limit = Math.min(parseInt(url.searchParams.get("limit") || "100"), 1000);
+    const afterId = safeInt(url.searchParams.get("after"), 0);
+    const limit = Math.min(safeInt(url.searchParams.get("limit"), 100), 1000);
 
     const rows = await env.DB.prepare(
       `SELECT id, timestamp, provider, model,
@@ -471,8 +471,8 @@ async function handleAPI(request: Request, url: URL, env: Env): Promise<Response
   // GET /api/records — export raw records for verification
   // Sentinels pull this to independently recompute leaf hashes and rebuild the MMR.
   if (url.pathname === "/api/records") {
-    const afterId = parseInt(url.searchParams.get("after") || "0");
-    const limit = Math.min(parseInt(url.searchParams.get("limit") || "1000"), 10000);
+    const afterId = safeInt(url.searchParams.get("after"), 0);
+    const limit = Math.min(safeInt(url.searchParams.get("limit"), 1000), 10000);
 
     const rows = await env.DB.prepare(
       `SELECT id, timestamp, user_hash, provider, model,
@@ -608,7 +608,7 @@ async function handleAPI(request: Request, url: URL, env: Env): Promise<Response
 
       return json({ ok: true, proof, signature });
     } catch (err) {
-      return json({ error: "Signing failed: " + String(err) }, 500);
+      return json({ error: "Signing failed" }, 500);
     }
   }
 
@@ -683,7 +683,7 @@ async function handleAPI(request: Request, url: URL, env: Env): Promise<Response
       const msg = oldWallet ? `Rebound from ${oldWallet.slice(0,6)}...${oldWallet.slice(-4)}` : "Wallet bound";
       return json({ ok: true, message: msg, wallet, previous: oldWallet || undefined });
     } catch (err) {
-      return json({ error: "Bind failed: " + String(err) }, 500);
+      return json({ error: "Bind failed" }, 500);
     }
   }
 
@@ -902,13 +902,23 @@ async function handleT20API(request: Request, url: URL, env: Env): Promise<Respo
 
 // ── Helpers ──
 
-function corsHeaders(): Record<string, string> {
+const ALLOWED_ORIGINS = ["https://token.nousai.cc", "https://nousai.cc"];
+
+function corsHeaders(request?: Request): Record<string, string> {
+  const origin = request?.headers.get("origin") || "";
+  const allowed = ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0];
   return {
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-    "Access-Control-Allow-Headers": "*",
+    "Access-Control-Allow-Origin": allowed,
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Api-Key, X-Goog-Api-Key, X-Nous-User, X-Nous-Upstream, X-Nous-Wallet, X-Wallet-Address, X-Wallet-Signature",
     "Access-Control-Max-Age": "86400",
+    "Vary": "Origin",
   };
+}
+
+function safeInt(val: string | null, fallback: number): number {
+  const n = parseInt(val || String(fallback));
+  return Number.isFinite(n) && n >= 0 ? n : fallback;
 }
 
 function json(data: unknown, status = 200): Response {

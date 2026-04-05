@@ -3,6 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://gateway.nousai.cc https://mainnet.base.org; img-src 'self' data:; frame-ancestors 'none'">
+<meta http-equiv="X-Frame-Options" content="DENY">
 <title>NOUS Token — AI Compute Proofs on Base</title>
 <meta name="description" content="Everything you spend on AI becomes an asset you own. Verifiable AI compute proofs on Base.">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -567,7 +569,8 @@ function fmtId(id){return isWallet(id)?id.slice(0,6)+'...'+id.slice(-4):id;}
 function idClass(id){return isWallet(id)?'user-hash wallet-addr':'user-hash';}
 
 // ── Wallet ──
-var myWallet = localStorage.getItem('nous_wallet') || '';
+var _stored = localStorage.getItem('nous_wallet') || '';
+var myWallet = /^0x[a-f0-9]{40}$/i.test(_stored) ? _stored.toLowerCase() : '';
 
 async function connectWallet(){
   if(window.ethereum){
