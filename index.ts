@@ -1,4 +1,7 @@
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
+import { readFileSync } from "fs";
+import { homedir } from "os";
+import { join } from "path";
 
 // nous-token plugin: routes LLM calls through the nous-token gateway
 // for real usage tracking on the global leaderboard.
@@ -11,6 +14,10 @@ import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 // to the gateway via X-Nous-User header.
 
 const GATEWAY = "https://gateway.nousai.cc";
+
+function loadWallet(): string {
+  try { return readFileSync(join(homedir(), ".nous-token"), "utf-8").trim(); } catch { return ""; }
+}
 
 // Built-in providers: prefix maps to gateway shortcut route
 const BUILTIN_PROVIDERS: Record<string, { prefix: string; api: string; envVars: string[] }> = {
@@ -34,11 +41,13 @@ interface PluginConfig {
 
 export default function plugin(api: OpenClawPluginApi): void {
   const cfg = (api.pluginConfig ?? {}) as PluginConfig;
+  const wallet = loadWallet();
+  const walletSegment = wallet ? `/w/${wallet}` : "";
 
   // ── Register built-in providers ──
   for (const [providerKey, { prefix, api: apiType, envVars }] of Object.entries(BUILTIN_PROVIDERS)) {
     registerProvider(api, providerKey, {
-      baseUrl: `${GATEWAY}/${prefix}/v1`,
+      baseUrl: `${GATEWAY}/${prefix}${walletSegment}/v1`,
       apiType,
       envVars,
     });
@@ -48,8 +57,7 @@ export default function plugin(api: OpenClawPluginApi): void {
   if (cfg.customProviders) {
     for (const [name, { upstream, envVar, api: apiType }] of Object.entries(cfg.customProviders)) {
       registerProvider(api, name, {
-        // Custom providers use X-Nous-Upstream header instead of shortcut prefix
-        baseUrl: `${GATEWAY}/v1`,
+        baseUrl: `${GATEWAY}${walletSegment}/v1`,
         apiType: apiType || "openai-completions",
         envVars: [envVar],
         upstreamHeader: upstream,
@@ -58,7 +66,8 @@ export default function plugin(api: OpenClawPluginApi): void {
   }
 
   const total = Object.keys(BUILTIN_PROVIDERS).length + Object.keys(cfg.customProviders || {}).length;
-  api.logger.info(`[nous-token] ready — ${total} providers, usage tracked via gateway`);
+  if (!wallet) api.logger.warn(`[nous-token] no wallet found — run "npx nous-token setup 0xYOUR_WALLET" to link usage to your address`);
+  api.logger.info(`[nous-token] ready — ${total} providers${wallet ? `, wallet ${wallet.slice(0, 6)}...${wallet.slice(-4)}` : ""}`);
 }
 
 // ── Provider registration ──
