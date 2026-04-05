@@ -516,7 +516,7 @@ async function loadMyProofs(){
       var p=d.data[i];
       html+='<div class="proof-card">'
         +'<div class="proof-card-title">'+esc(p.model)+' &middot; '+formatNumber(p.tokens)+' tokens</div>'
-        +'<div class="proof-card-detail">Block '+p.block_number+(p.anchor_tx?' &middot; <a href="https://basescan.org/tx/'+p.anchor_tx+'" target="_blank">Anchor tx</a>':'')+'</div>'
+        +'<div class="proof-card-detail">Block '+p.block_number+(p.anchor_tx&&/^0x[a-f0-9]{64}$/i.test(p.anchor_tx)?' &middot; <a href="https://basescan.org/tx/'+esc(p.anchor_tx)+'" target="_blank">Anchor tx</a>':'')+'</div>'
         +'</div>';
     }
     html+='</div>';

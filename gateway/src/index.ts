@@ -165,11 +165,15 @@ export default {
         if (parsed.protocol !== "https:") {
           return json({ error: "X-Nous-Upstream must use HTTPS" }, 400);
         }
-        // Block obvious internal/private ranges
-        const host = parsed.hostname;
+        // Block internal/private ranges (IPv4, IPv6, link-local, metadata)
+        const host = parsed.hostname.replace(/^\[|\]$/g, ""); // strip IPv6 brackets
         if (host === "localhost" || host === "127.0.0.1" || host === "0.0.0.0"
+          || host === "::1" || host === "[::1]" || host === "0000:0000:0000:0000:0000:0000:0000:0001"
           || host.startsWith("10.") || host.startsWith("192.168.") || host.startsWith("172.")
-          || host.endsWith(".local") || host.endsWith(".internal")) {
+          || host.startsWith("169.254.") || host.startsWith("fc") || host.startsWith("fd")
+          || host.startsWith("fe80") || host.startsWith("::ffff:127.")
+          || host.endsWith(".local") || host.endsWith(".internal")
+          || host === "metadata.google.internal" || host === "100.100.100.200") {
           return json({ error: "X-Nous-Upstream cannot target internal addresses" }, 400);
         }
         upstreamBase = parsed.origin;
@@ -499,15 +503,15 @@ async function handleAPI(request: Request, url: URL, env: Env): Promise<Response
   }
 
   // POST /api/sign — gateway signs a user's usage summary for on-chain proof
-  // Requires X-Nous-User header matching the requested user_hash.
+  // Requires API key — hash is computed server-side, not trusted from header.
   if (url.pathname === "/api/sign" && request.method === "POST") {
     if (!env.SIGNING_KEY) {
       return json({ error: "Signing not configured" }, 501);
     }
 
-    const callerHash = request.headers.get("x-nous-user");
-    if (!callerHash || !/^[a-f0-9]{32}$/.test(callerHash)) {
-      return json({ error: "X-Nous-User header required" }, 401);
+    const callerHash = await authenticateCaller(request);
+    if (!callerHash) {
+      return json({ error: "API key required (Authorization header)" }, 401);
     }
 
     try {
@@ -626,9 +630,9 @@ async function handleAPI(request: Request, url: URL, env: Env): Promise<Response
   // POST /api/bind-wallet — cryptographic wallet binding with signature verification
   // User signs "nous-token:bind:{wallet}" with their wallet, proving ownership.
   if (url.pathname === "/api/bind-wallet" && request.method === "POST") {
-    const callerHash = request.headers.get("x-nous-user");
-    if (!callerHash || !/^[a-f0-9]{32}$/.test(callerHash)) {
-      return json({ error: "X-Nous-User header required" }, 401);
+    const callerHash = await authenticateCaller(request);
+    if (!callerHash) {
+      return json({ error: "API key required (Authorization header)" }, 401);
     }
 
     try {
@@ -802,12 +806,17 @@ async function handleT20API(request: Request, url: URL, env: Env): Promise<Respo
       } catch { /* invalid sig */ }
     }
 
-    // Auth method 2: API key hash (CLI/SDK)
+    // Auth method 2: API key (CLI/SDK) — compute hash from key, don't trust X-Nous-User alone
     if (!wallet) {
-      const userHash = request.headers.get("x-nous-user");
-      if (userHash && /^[a-f0-9]{32}$/.test(userHash)) {
+      const authRaw = request.headers.get("authorization")
+        || request.headers.get("x-api-key")
+        || request.headers.get("x-goog-api-key")
+        || "";
+      const rawKey = authRaw.replace(/^Bearer\s+/i, "");
+      if (rawKey) {
+        const userHash = await sha256Short(rawKey);
         const walletRow = await env.DB.prepare(
-          `SELECT wallet FROM usage_records WHERE user_hash = ? AND wallet != '' LIMIT 1`
+          `SELECT wallet FROM usage_records WHERE user_hash = ? AND wallet != '' ORDER BY id DESC LIMIT 1`
         ).bind(userHash).first<{ wallet: string }>();
         if (walletRow) wallet = walletRow.wallet;
       }
@@ -907,6 +916,18 @@ function json(data: unknown, status = 200): Response {
     status,
     headers: { "Content-Type": "application/json", ...corsHeaders() },
   });
+}
+
+// Authenticate API caller: compute user_hash from API key.
+// Returns null if no API key present — never trusts X-Nous-User alone for API endpoints.
+async function authenticateCaller(request: Request): Promise<string | null> {
+  const authRaw = request.headers.get("authorization")
+    || request.headers.get("x-api-key")
+    || request.headers.get("x-goog-api-key")
+    || "";
+  const rawKey = authRaw.replace(/^Bearer\s+/i, "");
+  if (!rawKey) return null;
+  return sha256Short(rawKey);
 }
 
 // SHA-256, first 16 bytes as 32-char hex (matches plugin's hash)
