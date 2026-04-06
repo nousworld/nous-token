@@ -573,3 +573,209 @@ contract Token20UpgradeTest is Test {
         token.initialize(address(usdc), treasuryAddr, owner);
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// 5. INSCRIBE-WITH-PERMIT (RELAYER) TESTS
+// ═══════════════════════════════════════════════════════════════════
+
+/// @notice MockUSDC with EIP-2612 permit support
+contract MockUSDCPermit is MockUSDCAudit {
+    mapping(address => uint256) public nonces;
+
+    // Simplified permit: just approve (skip real EIP-2612 signature verification in mock)
+    function permit(
+        address owner_,
+        address spender,
+        uint256 value,
+        uint256 deadline,
+        uint8,
+        bytes32,
+        bytes32
+    ) external {
+        require(deadline >= block.timestamp, "Permit expired");
+        require(!blacklisted[owner_], "Blacklisted");
+        allowance[owner_][spender] = value;
+    }
+}
+
+contract Token20InscribeWithPermitTest is Test {
+    Token20 public token;
+    MockUSDCPermit public usdc;
+    address treasuryAddr = address(0x7EEE);
+    address owner = address(this);
+    address creator = address(0xC4EA704);
+    address relayer = address(0xABCD);
+
+    uint256 gatewayPk = 0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef;
+    address gateway;
+
+    uint256 alicePk = 0xA11CE00000000000000000000000000000000000000000000000000000000001;
+    address alice;
+
+    function setUp() public {
+        alice = vm.addr(alicePk);
+        gateway = vm.addr(gatewayPk);
+        vm.roll(1000);
+
+        usdc = new MockUSDCPermit();
+        token = DeployHelper.deployToken20(address(usdc), treasuryAddr, owner);
+        token.registerGateway(gateway);
+
+        usdc.mint(alice, 1000_000000);
+        usdc.mint(creator, 1000_000000);
+    }
+
+    function _makeReceipt(address wallet, string memory model, uint256 tokens, uint256 blockNum)
+        internal pure returns (bytes memory)
+    {
+        return abi.encode(Token20.Receipt({ wallet: wallet, model: model, tokens: tokens, blockNumber: blockNum }));
+    }
+
+    function _signReceipt(bytes memory receipt) internal view returns (bytes memory) {
+        bytes32 hash = keccak256(receipt);
+        bytes32 ethHash = MessageHashUtils.toEthSignedMessageHash(hash);
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(gatewayPk, ethHash);
+        return abi.encodePacked(r, s, v);
+    }
+
+    /// @dev Sign EIP-712 inscribe authorization as alice
+    function _signInscribeAuth(uint256 seriesId, bytes memory receipt, uint256 periodStart, uint256 nonce)
+        internal view returns (uint8 v, bytes32 r, bytes32 s)
+    {
+        bytes32 structHash = keccak256(abi.encode(
+            token.INSCRIBE_AUTH_TYPEHASH(),
+            seriesId,
+            keccak256(receipt),
+            periodStart,
+            nonce
+        ));
+        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", token.DOMAIN_SEPARATOR(), structHash));
+        (v, r, s) = vm.sign(alicePk, digest);
+    }
+
+    /// @notice Happy path: relayer submits inscribeWithPermit, wallet pays USDC via permit
+    function test_inscribeWithPermit_happyPath() public {
+        vm.startPrank(creator);
+        usdc.approve(address(token), 5_000000);
+        uint256 sid = token.deploy("PermitTest", "claude-4.6", 100, 10000, Token20.SeriesMode.OPEN, 2_000000);
+        vm.stopPrank();
+
+        bytes memory receipt = _makeReceipt(alice, "claude-4.6", 50000, 12345);
+        bytes memory gatewaySig = _signReceipt(receipt);
+        bytes32 receiptHash = keccak256(receipt);
+
+        vm.prank(gateway);
+        token.anchor(300, receiptHash, 1);
+
+        // Alice signs EIP-712 inscribe auth
+        (uint8 authV, bytes32 authR, bytes32 authS) = _signInscribeAuth(sid, receipt, 300, 0);
+
+        uint256 aliceBefore = usdc.balanceOf(alice);
+        uint256 treasuryBefore = usdc.balanceOf(treasuryAddr);
+        uint256 creatorBefore = usdc.balanceOf(creator);
+
+        // Relayer submits (permit params: mock doesn't verify sig, just approves)
+        vm.prank(relayer);
+        token.inscribeWithPermit(
+            sid, receipt, gatewaySig, new bytes32[](0), 300,
+            type(uint256).max, // permitDeadline
+            28, bytes32(0), bytes32(0), // permit v,r,s (mock accepts any)
+            authV, authR, authS
+        );
+
+        assertEq(token.ownerOf(1), alice);
+        assertEq(aliceBefore - usdc.balanceOf(alice), 2_000000);
+        assertEq(usdc.balanceOf(treasuryAddr) - treasuryBefore, 1_000000);
+        assertEq(usdc.balanceOf(creator) - creatorBefore, 1_000000);
+        assertEq(usdc.balanceOf(address(token)), 0);
+        assertEq(token.inscribeNonce(alice), 1);
+    }
+
+    /// @notice Replay same auth — nonce mismatch, reverts
+    function test_inscribeWithPermit_replayReverts() public {
+        vm.startPrank(creator);
+        usdc.approve(address(token), 5_000000);
+        uint256 sid = token.deploy("ReplayTest", "claude-4.6", 100, 10000, Token20.SeriesMode.OPEN, 1_000000);
+        vm.stopPrank();
+
+        bytes memory receipt = _makeReceipt(alice, "claude-4.6", 50000, 12345);
+        bytes memory gatewaySig = _signReceipt(receipt);
+
+        vm.prank(gateway);
+        token.anchor(300, keccak256(receipt), 1);
+
+        (uint8 authV, bytes32 authR, bytes32 authS) = _signInscribeAuth(sid, receipt, 300, 0);
+
+        vm.prank(relayer);
+        token.inscribeWithPermit(
+            sid, receipt, gatewaySig, new bytes32[](0), 300,
+            type(uint256).max, 28, bytes32(0), bytes32(0),
+            authV, authR, authS
+        );
+
+        // Replay — nonce incremented, old sig invalid
+        vm.prank(relayer);
+        vm.expectRevert("Invalid inscribe auth");
+        token.inscribeWithPermit(
+            sid, receipt, gatewaySig, new bytes32[](0), 300,
+            type(uint256).max, 28, bytes32(0), bytes32(0),
+            authV, authR, authS
+        );
+    }
+
+    /// @notice Wrong signer — reverts
+    function test_inscribeWithPermit_wrongSigner_reverts() public {
+        vm.startPrank(creator);
+        usdc.approve(address(token), 5_000000);
+        uint256 sid = token.deploy("WrongSig", "claude-4.6", 100, 10000, Token20.SeriesMode.OPEN, 1_000000);
+        vm.stopPrank();
+
+        bytes memory receipt = _makeReceipt(alice, "claude-4.6", 50000, 12345);
+        bytes memory gatewaySig = _signReceipt(receipt);
+
+        vm.prank(gateway);
+        token.anchor(300, keccak256(receipt), 1);
+
+        // Attacker signs EIP-712 (not alice)
+        uint256 attackerPk = 0xBAD0000000000000000000000000000000000000000000000000000000000001;
+        bytes32 structHash = keccak256(abi.encode(
+            token.INSCRIBE_AUTH_TYPEHASH(), sid, keccak256(receipt), uint256(300), uint256(0)
+        ));
+        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", token.DOMAIN_SEPARATOR(), structHash));
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(attackerPk, digest);
+
+        vm.prank(relayer);
+        vm.expectRevert("Invalid inscribe auth");
+        token.inscribeWithPermit(
+            sid, receipt, gatewaySig, new bytes32[](0), 300,
+            type(uint256).max, 28, bytes32(0), bytes32(0),
+            v, r, s
+        );
+    }
+
+    /// @notice Multiple inscribes with incrementing nonces
+    function test_inscribeWithPermit_multipleNonces() public {
+        vm.startPrank(creator);
+        usdc.approve(address(token), 5_000000);
+        uint256 sid = token.deploy("MultiNonce", "claude-4.6", 100, 10000, Token20.SeriesMode.OPEN, 1_000000);
+        vm.stopPrank();
+
+        bytes memory receipt = _makeReceipt(alice, "claude-4.6", 50000, 12345);
+        bytes memory gatewaySig = _signReceipt(receipt);
+
+        vm.prank(gateway);
+        token.anchor(300, keccak256(receipt), 1);
+
+        for (uint256 i = 0; i < 3; i++) {
+            (uint8 authV, bytes32 authR, bytes32 authS) = _signInscribeAuth(sid, receipt, 300, i);
+            vm.prank(relayer);
+            token.inscribeWithPermit(
+                sid, receipt, gatewaySig, new bytes32[](0), 300,
+                type(uint256).max, 28, bytes32(0), bytes32(0),
+                authV, authR, authS
+            );
+            assertEq(token.inscribeNonce(alice), i + 1);
+        }
+        assertEq(token.receiptUsed(keccak256(receipt)), 30000);
+    }
+}

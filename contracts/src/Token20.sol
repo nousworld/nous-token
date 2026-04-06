@@ -11,7 +11,7 @@ import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "@openzeppelin/contracts/utils/cryptography/MerkleProof.sol";
 import "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
-/// @notice Minimal EIP-3009 interface (USDC)
+/// @notice Minimal EIP-3009 + EIP-2612 interface (USDC on Base)
 interface IERC20WithAuth {
     function transfer(address to, uint256 value) external returns (bool);
     function transferFrom(address from, address to, uint256 value) external returns (bool);
@@ -22,6 +22,15 @@ interface IERC20WithAuth {
         uint256 validAfter,
         uint256 validBefore,
         bytes32 nonce,
+        uint8 v,
+        bytes32 r,
+        bytes32 s
+    ) external;
+    function permit(
+        address owner,
+        address spender,
+        uint256 value,
+        uint256 deadline,
         uint8 v,
         bytes32 r,
         bytes32 s
@@ -93,6 +102,27 @@ contract Token20 is ERC721Upgradeable, OwnableUpgradeable, PausableUpgradeable, 
 
     // Anchor state
     mapping(uint256 => bytes32) public anchors;
+
+    // Relayer nonce (per-wallet, prevents replay of inscribe authorization)
+    mapping(address => uint256) public inscribeNonce;
+
+    // EIP-712 for inscribe authorization (relayer/agent path)
+    bytes32 public constant INSCRIBE_AUTH_TYPEHASH = keccak256(
+        "InscribeAuth(uint256 seriesId,bytes32 receiptHash,uint256 periodStart,uint256 nonce)"
+    );
+    bytes32 private constant EIP712_DOMAIN_TYPEHASH = keccak256(
+        "EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"
+    );
+
+    function DOMAIN_SEPARATOR() public view returns (bytes32) {
+        return keccak256(abi.encode(
+            EIP712_DOMAIN_TYPEHASH,
+            keccak256("Token20"),
+            keccak256("1"),
+            block.chainid,
+            address(this)
+        ));
+    }
 
     // ─── Events ───
 
@@ -295,6 +325,56 @@ contract Token20 is ERC721Upgradeable, OwnableUpgradeable, PausableUpgradeable, 
         _inscribe(seriesId, receipt, r, signature, merkleProof, periodStart, fee);
     }
 
+    /// @notice Relayer-compatible inscribe with EIP-2612 permit + EIP-712 authorization.
+    /// Wallet signs two things: (1) USDC permit for exact fee amount, (2) EIP-712 inscribe auth.
+    /// Relayer submits both signatures. USDC goes directly from wallet to treasury/creator.
+    /// Gateway never holds USDC — only pays gas.
+    function inscribeWithPermit(
+        uint256 seriesId,
+        bytes calldata receipt,
+        bytes calldata gatewaySignature,
+        bytes32[] calldata merkleProof,
+        uint256 periodStart,
+        // EIP-2612 permit params (USDC approval for exact fee)
+        uint256 permitDeadline,
+        uint8 permitV,
+        bytes32 permitR,
+        bytes32 permitS,
+        // EIP-712 inscribe authorization
+        uint8 authV,
+        bytes32 authR,
+        bytes32 authS
+    ) external whenNotPaused {
+        Receipt memory r = _decodeReceipt(receipt);
+        Series storage s = series[seriesId];
+        uint256 fee = s.inscriptionFee;
+
+        // 1. Verify EIP-712 inscribe authorization (wallet authorized this specific inscribe)
+        bytes32 structHash = keccak256(abi.encode(
+            INSCRIBE_AUTH_TYPEHASH,
+            seriesId,
+            keccak256(receipt),
+            periodStart,
+            inscribeNonce[r.wallet]
+        ));
+        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", DOMAIN_SEPARATOR(), structHash));
+        address signer = ECDSA.recover(digest, authV, authR, authS);
+        require(signer == r.wallet, "Invalid inscribe auth");
+        inscribeNonce[r.wallet]++;
+
+        // 2. Execute USDC permit (wallet approves exact fee to this contract)
+        usdc.permit(r.wallet, address(this), fee, permitDeadline, permitV, permitR, permitS);
+
+        // 3. Push fees: USDC from wallet directly to treasury and creator
+        require(usdc.transferFrom(r.wallet, treasury, PROTOCOL_FEE), "USDC transfer failed");
+        if (fee > PROTOCOL_FEE) {
+            _payCreator(r.wallet, s.creator, fee - PROTOCOL_FEE, seriesId);
+        }
+
+        // 4. Core inscribe logic
+        _inscribeCore(seriesId, receipt, r, gatewaySignature, merkleProof, periodStart, fee);
+    }
+
     function _payCreator(address payer, address creator, uint256 amount, uint256 seriesId) internal {
         if (!usdc.transferFrom(payer, creator, amount)) {
             require(usdc.transferFrom(payer, treasury, amount), "Fallback transfer failed");
@@ -303,6 +383,20 @@ contract Token20 is ERC721Upgradeable, OwnableUpgradeable, PausableUpgradeable, 
     }
 
     function _inscribe(
+        uint256 seriesId,
+        bytes calldata receiptBytes,
+        Receipt memory r,
+        bytes calldata signature,
+        bytes32[] calldata merkleProof,
+        uint256 periodStart,
+        uint256 fee
+    ) internal {
+        // Direct call: msg.sender must be the receipt wallet
+        require(msg.sender == r.wallet, "Not receipt owner");
+        _inscribeCore(seriesId, receiptBytes, r, signature, merkleProof, periodStart, fee);
+    }
+
+    function _inscribeCore(
         uint256 seriesId,
         bytes calldata receiptBytes,
         Receipt memory r,
@@ -320,8 +414,6 @@ contract Token20 is ERC721Upgradeable, OwnableUpgradeable, PausableUpgradeable, 
         if (s.modelIdHash != bytes32(0)) {
             require(keccak256(bytes(r.model)) == s.modelIdHash, "Model mismatch");
         }
-
-        require(msg.sender == r.wallet, "Not receipt owner");
 
         if (s.mode == SeriesMode.RESTRICTED) {
             require(authorized[seriesId][r.wallet], "Not authorized");

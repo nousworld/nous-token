@@ -42,7 +42,7 @@ import {
 import {
   createSignedReceipt, buildMerkleTree, submitAnchor,
   getCurrentBlock, getAnchorPeriod, formatReceiptHeader,
-  checkAnchorOnChain,
+  checkAnchorOnChain, submitInscribeWithPermit, getInscribeNonce,
   type SignedReceipt
 } from "./token20";
 import { verifyMessage } from "viem";
@@ -941,6 +941,129 @@ async function handleT20API(request: Request, url: URL, env: Env): Promise<Respo
       `SELECT * FROM t20_anchors ORDER BY period_start DESC LIMIT 50`
     ).all();
     return json({ ok: true, data: rows.results });
+  }
+
+  // POST /api/t20/inscribe — relayer endpoint for agents
+  // Agent provides: seriesId + permit signature (USDC) + EIP-712 inscribe auth signature.
+  // Gateway looks up receipt + proof, submits inscribeWithPermit. USDC goes wallet→treasury/creator.
+  if (url.pathname === "/api/t20/inscribe" && request.method === "POST") {
+    if (!env.GATEWAY_PRIVATE_KEY) {
+      return json({ error: "Not configured" }, 501);
+    }
+
+    // Authenticate: JWT or API key
+    let wallet = "";
+
+    const authHeaderVal = request.headers.get("authorization") || "";
+    const bearerVal = authHeaderVal.replace(/^Bearer\s+/i, "").trim();
+    if (bearerVal && bearerVal.includes(".")) {
+      const signingKey = await getSigningKey(env);
+      if (signingKey) wallet = await verifyWalletJWT(signingKey, bearerVal);
+    }
+
+    if (!wallet) {
+      const callerHash = await authenticateCaller(request);
+      if (callerHash) {
+        const walletRow = await env.DB.prepare(
+          `SELECT wallet FROM usage_records WHERE user_hash = ? AND wallet != '' ORDER BY id DESC LIMIT 1`
+        ).bind(callerHash).first<{ wallet: string }>();
+        if (walletRow) wallet = walletRow.wallet;
+      }
+    }
+
+    if (!wallet) {
+      return json({ error: "Authentication required (JWT or API key with bound wallet)" }, 401);
+    }
+
+    try {
+      const body = await request.json() as {
+        series_id?: number;
+        // EIP-2612 permit (USDC approval for exact fee)
+        permit_deadline?: number;
+        permit_v?: number;
+        permit_r?: string;
+        permit_s?: string;
+        // EIP-712 inscribe auth
+        auth_v?: number;
+        auth_r?: string;
+        auth_s?: string;
+      };
+
+      if (!body.series_id || typeof body.series_id !== "number") {
+        return json({ error: "series_id required" }, 400);
+      }
+      if (!body.permit_v || !body.permit_r || !body.permit_s || !body.permit_deadline) {
+        return json({ error: "permit signature required (permit_deadline, permit_v, permit_r, permit_s)" }, 400);
+      }
+      if (!body.auth_v || !body.auth_r || !body.auth_s) {
+        return json({ error: "inscribe auth signature required (auth_v, auth_r, auth_s)" }, 400);
+      }
+
+      // Find best anchored receipt
+      const receiptRow = await env.DB.prepare(
+        `SELECT r.*, a.merkle_root, a.period_start
+         FROM t20_receipts r
+         JOIN t20_anchors a ON r.anchor_period = a.period_start AND a.verified = 1
+         WHERE r.wallet = ?
+         ORDER BY r.tokens DESC
+         LIMIT 1`
+      ).bind(wallet).first<Record<string, unknown>>();
+
+      if (!receiptRow) {
+        return json({ error: "No anchored receipt found for this wallet" }, 404);
+      }
+
+      const proofData = await getReceiptProofData(env.DB, receiptRow.receipt_hash as string);
+      if (!proofData) {
+        return json({ error: "Cannot build merkle proof" }, 500);
+      }
+
+      const hashes = proofData.allHashes.map(h => h as Hex);
+      const { proofs } = buildMerkleTree(hashes);
+      const merkleProof = proofs.get(receiptRow.receipt_hash as Hex) || [];
+
+      const pk = (env.GATEWAY_PRIVATE_KEY.startsWith("0x")
+        ? env.GATEWAY_PRIVATE_KEY
+        : "0x" + env.GATEWAY_PRIVATE_KEY) as Hex;
+
+      const txHash = await submitInscribeWithPermit(
+        pk,
+        body.series_id,
+        receiptRow.receipt_encoded as Hex,
+        receiptRow.signature as Hex,
+        merkleProof,
+        proofData.anchorPeriod,
+        BigInt(body.permit_deadline),
+        body.permit_v,
+        body.permit_r as Hex,
+        body.permit_s as Hex,
+        body.auth_v,
+        body.auth_r as Hex,
+        body.auth_s as Hex
+      );
+
+      return json({
+        ok: true,
+        tx_hash: txHash,
+        wallet,
+        series_id: body.series_id,
+        receipt_tokens: receiptRow.tokens,
+        period_start: proofData.anchorPeriod,
+      });
+    } catch (err) {
+      return json({ error: `Inscribe failed: ${String(err)}` }, 500);
+    }
+  }
+
+  // GET /api/t20/nonce/:wallet — get current inscribe nonce for wallet auth signing
+  const nonceMatch = url.pathname.match(/^\/api\/t20\/nonce\/(0x[a-f0-9]{40})$/);
+  if (nonceMatch) {
+    try {
+      const nonce = await getInscribeNonce(nonceMatch[1] as Address);
+      return json({ ok: true, wallet: nonceMatch[1], nonce });
+    } catch (err) {
+      return json({ error: `Failed to read nonce: ${String(err)}` }, 500);
+    }
   }
 
   // POST /api/t20/anchor — manually trigger anchor (admin only)

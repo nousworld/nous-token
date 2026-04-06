@@ -150,6 +150,33 @@ const TOKEN20_ABI = [
     outputs: [],
     stateMutability: "nonpayable",
   },
+  {
+    name: "inscribeWithPermit",
+    type: "function",
+    inputs: [
+      { name: "seriesId", type: "uint256" },
+      { name: "receipt", type: "bytes" },
+      { name: "gatewaySignature", type: "bytes" },
+      { name: "merkleProof", type: "bytes32[]" },
+      { name: "periodStart", type: "uint256" },
+      { name: "permitDeadline", type: "uint256" },
+      { name: "permitV", type: "uint8" },
+      { name: "permitR", type: "bytes32" },
+      { name: "permitS", type: "bytes32" },
+      { name: "authV", type: "uint8" },
+      { name: "authR", type: "bytes32" },
+      { name: "authS", type: "bytes32" },
+    ],
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+  {
+    name: "inscribeNonce",
+    type: "function",
+    inputs: [{ name: "wallet", type: "address" }],
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "view",
+  },
 ] as const;
 
 /**
@@ -227,6 +254,82 @@ export async function checkAnchorOnChain(periodStart: number): Promise<Hex> {
     args: [BigInt(periodStart)],
   });
   return result as Hex;
+}
+
+// ─── InscribeFor (Relayer) ───
+
+/**
+ * Submit inscribeWithPermit tx on-chain as relayer.
+ * Wallet pays USDC via EIP-2612 permit (exact amount), relayer pays gas.
+ * USDC never touches gateway — goes directly from wallet to treasury/creator.
+ */
+export async function submitInscribeWithPermit(
+  privateKey: Hex,
+  seriesId: number,
+  receiptEncoded: Hex,
+  gatewaySignature: Hex,
+  merkleProof: Hex[],
+  periodStart: number,
+  permitDeadline: bigint,
+  permitV: number,
+  permitR: Hex,
+  permitS: Hex,
+  authV: number,
+  authR: Hex,
+  authS: Hex
+): Promise<Hex> {
+  const account = privateKeyToAccount(privateKey);
+
+  for (const rpc of [BASE_RPC_PRIMARY, BASE_RPC_FALLBACK]) {
+    try {
+      const client = createWalletClient({
+        account,
+        chain: base,
+        transport: http(rpc),
+      });
+
+      return await client.writeContract({
+        address: TOKEN20_ADDRESS,
+        abi: TOKEN20_ABI,
+        functionName: "inscribeWithPermit",
+        args: [
+          BigInt(seriesId),
+          receiptEncoded,
+          gatewaySignature,
+          merkleProof,
+          BigInt(periodStart),
+          permitDeadline,
+          permitV,
+          permitR,
+          permitS,
+          authV,
+          authR,
+          authS,
+        ],
+      });
+    } catch (err) {
+      if (rpc === BASE_RPC_FALLBACK) throw err;
+      console.warn(`Primary RPC failed for inscribeWithPermit, trying fallback: ${err}`);
+    }
+  }
+  throw new Error("All RPCs failed");
+}
+
+/**
+ * Get the current inscribe nonce for a wallet (for signing walletAuth).
+ */
+export async function getInscribeNonce(wallet: Address): Promise<number> {
+  const client = createPublicClient({
+    chain: base,
+    transport: http(BASE_RPC_PRIMARY),
+  });
+  const result = await client.readContract({
+    address: TOKEN20_ADDRESS,
+    abi: TOKEN20_ABI,
+    functionName: "inscribeNonce",
+    args: [wallet],
+  });
+  return Number(result);
 }
 
 // ─── Receipt Header ───
