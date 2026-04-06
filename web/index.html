@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-R9IXwEYYfRzNiXSzQHtu6MZxn0FGtjfC9W9ipcjHJns='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://gateway.nousai.cc https://mainnet.base.org; img-src 'self' data:; frame-ancestors 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-GCXCwMWh69gJljQloTEnji/NeA/oIj7WBYQq1TNMH/g='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://gateway.nousai.cc https://mainnet.base.org; img-src 'self' data:; frame-ancestors 'none'">
 <meta http-equiv="X-Frame-Options" content="DENY">
 <title>NOUS Token — AI Compute Proofs on Base</title>
 <meta name="description" content="Everything you spend on AI becomes an asset you own. Verifiable AI compute proofs on Base.">
@@ -509,9 +509,27 @@ async function doInscribe(seriesId,fee){
 async function loadMyProofs(){
   var el=document.getElementById('proofsContent');
   if(!myWallet){el.innerHTML='<div class="loading">Connect wallet to see your proofs.</div>';return;}
+
+  // Check JWT — if expired, show re-auth prompt
+  if(!isJWTValid()){
+    if(!window.ethereum){
+      el.innerHTML='<div class="loading">Session expired. Reconnect wallet to view proofs.</div>';
+      return;
+    }
+    el.innerHTML='<div class="loading">Session expired.<br><button class="btn" style="margin-top:12px" onclick="reauth()">Sign to continue</button></div>';
+    return;
+  }
+
   el.innerHTML='<div class="loading">Loading proofs...</div>';
   try{
-    var r=await fetch(API+'/api/t20/wallet/'+myWallet);var d=await r.json();
+    var r=await fetch(API+'/api/t20/my-receipts',{headers:{'Authorization':'Bearer '+walletJWT}});
+    if(r.status===401){
+      // JWT rejected server-side — clear and prompt
+      walletJWT='';sessionStorage.removeItem('nous_jwt');
+      el.innerHTML='<div class="loading">Session expired.<br><button class="btn" style="margin-top:12px" onclick="reauth()">Sign to continue</button></div>';
+      return;
+    }
+    var d=await r.json();
     if(!d.ok||!d.data||d.data.length===0){
       el.innerHTML='<div class="loading">No proofs yet. Use AI through the gateway, then inscribe when you hit a series threshold.</div>';
       return;
@@ -571,16 +589,62 @@ function isWallet(s){return/^0x[a-f0-9]{40}$/i.test(s);}
 function fmtId(id){return isWallet(id)?id.slice(0,6)+'...'+id.slice(-4):id;}
 function idClass(id){return isWallet(id)?'user-hash wallet-addr':'user-hash';}
 
-// ── Wallet ──
+// ── Wallet + JWT Session ──
 var _stored = localStorage.getItem('nous_wallet') || '';
-var myWallet = /^0x[a-f0-9]{40}$/i.test(_stored) ? _stored.toLowerCase() : '';
+var walletJWT = sessionStorage.getItem('nous_jwt') || '';
+var jwtExpiry = parseInt(sessionStorage.getItem('nous_jwt_exp') || '0', 10);
+// Only restore wallet if JWT is still valid — otherwise require re-auth
+var myWallet = '';
+if(/^0x[a-f0-9]{40}$/i.test(_stored) && walletJWT && Date.now()/1000 < jwtExpiry - 30){
+  myWallet = _stored.toLowerCase();
+}
+
+function isJWTValid(){ return walletJWT && Date.now()/1000 < jwtExpiry - 30; } // 30s buffer
+
+async function getWalletSignature(wallet){
+  var ts = Math.floor(Date.now()/1000);
+  var msg = 'nous-token:auth:' + wallet + ':' + ts;
+  var sig = await window.ethereum.request({method:'personal_sign',params:[msg,wallet]});
+  return {signature:sig, timestamp:ts};
+}
+
+async function authenticateWallet(wallet){
+  try{
+    var s = await getWalletSignature(wallet);
+    var r = await fetch(API+'/api/auth/wallet',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({wallet:wallet,signature:s.signature,timestamp:s.timestamp})});
+    var d = await r.json();
+    if(d.ok && d.token){
+      walletJWT = d.token;
+      jwtExpiry = Math.floor(Date.now()/1000) + d.expires_in;
+      sessionStorage.setItem('nous_jwt', walletJWT);
+      sessionStorage.setItem('nous_jwt_exp', String(jwtExpiry));
+      return true;
+    }
+  }catch(e){console.error('Auth failed:',e);}
+  return false;
+}
+
+async function ensureAuth(){
+  if(isJWTValid()) return true;
+  if(!window.ethereum || !myWallet) return false;
+  return authenticateWallet(myWallet);
+}
 
 async function connectWallet(){
   if(window.ethereum){
     try{
       await window.ethereum.request({method:'wallet_requestPermissions',params:[{eth_accounts:{}}]});
       var accounts=await window.ethereum.request({method:'eth_accounts'});
-      if(accounts&&accounts[0]){setWallet(accounts[0].toLowerCase());}
+      if(accounts&&accounts[0]){
+        var addr = accounts[0].toLowerCase();
+        // Must sign to connect — proves wallet ownership
+        var authed = await authenticateWallet(addr);
+        if(authed){
+          setWallet(addr);
+        } else {
+          alert('Signature required to connect wallet.');
+        }
+      }
     }catch(e){if(e.code!==4001)alert('Wallet connection failed.');}
     return;
   }
@@ -606,7 +670,8 @@ function updateWalletBtn(){
 
 function toggleWalletMenu(){document.getElementById('walletMenu').classList.toggle('active');}
 function closeWalletMenu(){document.getElementById('walletMenu').classList.remove('active');}
-function disconnectWallet(){myWallet='';localStorage.removeItem('nous_wallet');closeWalletMenu();updateWalletBtn();loadLeaderboard(currentPeriod);}
+function disconnectWallet(){myWallet='';walletJWT='';jwtExpiry=0;localStorage.removeItem('nous_wallet');sessionStorage.removeItem('nous_jwt');sessionStorage.removeItem('nous_jwt_exp');closeWalletMenu();updateWalletBtn();loadLeaderboard(currentPeriod);}
+async function reauth(){if(await ensureAuth()){loadMyProofs();}else{alert('Signature required to view proofs.');}}
 document.addEventListener('click',function(e){if(!document.getElementById('walletDropdown').contains(e.target))closeWalletMenu();});
 function isMyRow(id){return myWallet&&id.toLowerCase()===myWallet;}
 function openModal(){document.getElementById('walletModal').classList.add('active');document.getElementById('modalWalletInput').focus();}
@@ -615,7 +680,10 @@ function submitModal(){
   var consent=document.getElementById('tosConsent');
   if(!consent.checked){consent.parentElement.style.color='var(--amber)';setTimeout(function(){consent.parentElement.style.color='';},1500);return;}
   var v=document.getElementById('modalWalletInput').value.trim().toLowerCase();
-  if(isWallet(v)){setWallet(v);closeModal();}
+  if(isWallet(v)){
+    // Manual input = read-only mode (public data only, no JWT, no My Proofs signatures)
+    setWallet(v);closeModal();
+  }
   else{var inp=document.getElementById('modalWalletInput');inp.style.borderColor='var(--amber)';setTimeout(function(){inp.style.borderColor='';},1500);}
 }
 updateWalletBtn();

@@ -101,8 +101,8 @@ export default {
         await initDB(env.DB);
         dbReady = true;
       }
-      // Token-20 endpoints
-      if (url.pathname.startsWith("/api/t20/")) {
+      // Token-20 endpoints + wallet auth
+      if (url.pathname.startsWith("/api/t20/") || url.pathname.startsWith("/api/auth/")) {
         const t20Response = await handleT20API(request, url, env);
         if (t20Response) return t20Response;
       }
@@ -832,8 +832,20 @@ async function handleT20API(request: Request, url: URL, env: Env): Promise<Respo
       }
     }
 
+    // Auth method 3: JWT session token (from /api/auth/wallet)
     if (!wallet) {
-      return json({ error: "Authentication required. Provide X-Wallet-Address + X-Wallet-Signature, or X-Nous-User header." }, 401);
+      const authHeader = request.headers.get("authorization") || "";
+      const bearer = authHeader.replace(/^Bearer\s+/i, "").trim();
+      if (bearer && bearer.includes(".")) {
+        const signingKey = await getSigningKey(env);
+        if (signingKey) {
+          wallet = await verifyWalletJWT(signingKey, bearer);
+        }
+      }
+    }
+
+    if (!wallet) {
+      return json({ error: "Authentication required. Provide JWT (Authorization: Bearer), wallet signature, or API key." }, 401);
     }
 
     const rows = await env.DB.prepare(
@@ -862,6 +874,48 @@ async function handleT20API(request: Request, url: URL, env: Env): Promise<Respo
     }
 
     return json({ ok: true, wallet, data: results });
+  }
+
+  // POST /api/auth/wallet — wallet signature → JWT session token (1 hour)
+  if (url.pathname === "/api/auth/wallet" && request.method === "POST") {
+    const signingKey = await getSigningKey(env);
+    if (!signingKey) {
+      return json({ error: "Signing not configured" }, 501);
+    }
+
+    try {
+      const body = await request.json() as { wallet?: string; signature?: string; timestamp?: number };
+      const wallet = (body.wallet || "").toLowerCase();
+      const signature = body.signature || "";
+      const ts = body.timestamp;
+
+      if (!wallet || !/^0x[a-f0-9]{40}$/.test(wallet)) {
+        return json({ error: "Invalid wallet address" }, 400);
+      }
+      if (!signature || !ts || typeof ts !== "number") {
+        return json({ error: "signature and timestamp required" }, 400);
+      }
+
+      const now = Math.floor(Date.now() / 1000);
+      if (Math.abs(now - ts) > 300) {
+        return json({ error: "Timestamp expired (5 minute window)" }, 400);
+      }
+
+      const valid = await verifyMessage({
+        address: wallet as Address,
+        message: `nous-token:auth:${wallet}:${ts}`,
+        signature: signature as Hex,
+      });
+      if (!valid) {
+        return json({ error: "Invalid signature" }, 403);
+      }
+
+      // Issue JWT — 1 hour expiry
+      const jwt = await createWalletJWT(signingKey, wallet, now + 3600);
+      return json({ ok: true, token: jwt, wallet, expires_in: 3600 });
+    } catch {
+      return json({ error: "Auth failed" }, 500);
+    }
   }
 
   // GET /api/t20/wallet/:address — receipts summary for a wallet (public, no sensitive fields)
@@ -1007,6 +1061,54 @@ function timingSafeEqual(a: string, b: string): boolean {
     result |= bufA[i] ^ bufB[i];
   }
   return result === 0;
+}
+
+// ── JWT Helpers (compact, HMAC-based using SIGNING_KEY) ──
+
+async function createWalletJWT(signingKey: CryptoKey, wallet: string, exp: number): Promise<string> {
+  const header = btoa(JSON.stringify({ alg: "HS256", typ: "JWT" })).replace(/=+$/, "");
+  const payload = btoa(JSON.stringify({ sub: wallet, exp })).replace(/=+$/, "");
+  const data = `${header}.${payload}`;
+  // Derive HMAC key from ECDSA signing key by signing a fixed seed
+  const hmacKeyBuf = await crypto.subtle.sign(
+    { name: "ECDSA", hash: "SHA-256" },
+    signingKey,
+    new TextEncoder().encode("nous-token-jwt-hmac-seed")
+  );
+  const hmacKey = await crypto.subtle.importKey(
+    "raw", hmacKeyBuf, { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"]
+  );
+  const sigBuf = await crypto.subtle.sign("HMAC", hmacKey, new TextEncoder().encode(data));
+  const sig = btoa(String.fromCharCode(...new Uint8Array(sigBuf))).replace(/=+$/, "").replace(/\+/g, "-").replace(/\//g, "_");
+  return `${data}.${sig}`;
+}
+
+async function verifyWalletJWT(signingKey: CryptoKey, token: string): Promise<string> {
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3) return "";
+
+    const data = `${parts[0]}.${parts[1]}`;
+    const sig = Uint8Array.from(atob(parts[2].replace(/-/g, "+").replace(/_/g, "/")), c => c.charCodeAt(0));
+
+    const hmacKeyBuf = await crypto.subtle.sign(
+      { name: "ECDSA", hash: "SHA-256" },
+      signingKey,
+      new TextEncoder().encode("nous-token-jwt-hmac-seed")
+    );
+    const hmacKey = await crypto.subtle.importKey(
+      "raw", hmacKeyBuf, { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"]
+    );
+
+    const valid = await crypto.subtle.verify("HMAC", hmacKey, sig, new TextEncoder().encode(data));
+    if (!valid) return "";
+
+    const payload = JSON.parse(atob(parts[1] + "=".repeat((4 - parts[1].length % 4) % 4)));
+    if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) return ""; // expired
+    return (payload.sub || "").toLowerCase();
+  } catch {
+    return "";
+  }
 }
 
 // SHA-256, first 16 bytes as 32-char hex (matches plugin's hash)
