@@ -1,0 +1,71 @@
+name: Sentinel Verification
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'  # every 6 hours
+  workflow_dispatch: # manual trigger
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run Sentinel
+        id: sentinel
+        run: |
+          npx tsx sentinel.ts 2>&1 | tee /tmp/sentinel-output.txt
+          echo "exit_code=${PIPESTATUS[0]}" >> $GITHUB_OUTPUT
+
+      - name: Write verification log
+        run: |
+          mkdir -p sentinel-logs
+          TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          DATE=$(date -u +"%Y-%m-%d")
+          EXIT_CODE=${{ steps.sentinel.outputs.exit_code }}
+
+          if [ "$EXIT_CODE" = "0" ]; then
+            STATUS="PASS"
+          else
+            STATUS="FAIL"
+          fi
+
+          # Write individual log
+          cat > "sentinel-logs/${DATE}-${TIMESTAMP}.md" << EOF
+          # Sentinel Verification — ${TIMESTAMP}
+
+          **Status**: ${STATUS}
+          **Gateway**: https://gateway.nousai.cc
+
+          ## Output
+          \`\`\`
+          $(cat /tmp/sentinel-output.txt)
+          \`\`\`
+          EOF
+
+          # Update summary
+          echo "| ${TIMESTAMP} | ${STATUS} | [log](sentinel-logs/${DATE}-${TIMESTAMP}.md) |" >> sentinel-logs/HISTORY.md
+
+      - name: Create HISTORY header if needed
+        run: |
+          if ! head -1 sentinel-logs/HISTORY.md 2>/dev/null | grep -q "Timestamp"; then
+            TEMP=$(cat sentinel-logs/HISTORY.md 2>/dev/null || true)
+            echo "| Timestamp | Status | Log |" > sentinel-logs/HISTORY.md
+            echo "|-----------|--------|-----|" >> sentinel-logs/HISTORY.md
+            echo "$TEMP" >> sentinel-logs/HISTORY.md
+          fi
+
+      - name: Commit results
+        run: |
+          git config user.name "nous-sentinel"
+          git config user.email "sentinel@nousai.cc"
+          git add sentinel-logs/
+          git diff --cached --quiet || git commit -m "sentinel: $(date -u +%Y-%m-%d) verification ${{ steps.sentinel.outputs.exit_code == '0' && 'PASS' || 'FAIL' }}"
+          git push
