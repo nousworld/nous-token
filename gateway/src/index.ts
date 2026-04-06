@@ -51,6 +51,35 @@ import type { Hex, Address } from "viem";
 let dbReady = false;
 let cachedSigningKey: CryptoKey | null = null;
 
+// ── SIWE helpers (EIP-4361) ──
+
+const SIWE_DOMAIN = "token.nousai.cc";
+const SIWE_URI = "https://token.nousai.cc";
+const SIWE_CHAIN_ID = "8453"; // Base
+const SIWE_VERSION = "1";
+const SIWE_NONCE_TTL = 300; // 5 minutes
+
+function generateNonce(): string {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, b => b.toString(16).padStart(2, "0")).join("");
+}
+
+function parseSiweMessage(msg: string): {
+  domain: string; address: string; statement: string;
+  uri: string; version: string; chainId: string;
+  nonce: string; issuedAt: string;
+} | null {
+  const re = /^(.+?) wants you to sign in with your Ethereum account:\n(0x[a-fA-F0-9]{40})\n\n(.*?)\n\nURI: (.+?)\nVersion: (\d+)\nChain ID: (\d+)\nNonce: ([a-f0-9]+)\nIssued At: (.+)$/s;
+  const m = msg.match(re);
+  if (!m) return null;
+  return {
+    domain: m[1], address: m[2], statement: m[3],
+    uri: m[4], version: m[5], chainId: m[6],
+    nonce: m[7], issuedAt: m[8],
+  };
+}
+
 async function getSigningKey(env: Env): Promise<CryptoKey | null> {
   if (cachedSigningKey) return cachedSigningKey;
   if (!env.SIGNING_KEY) return null;
@@ -876,7 +905,19 @@ async function handleT20API(request: Request, url: URL, env: Env): Promise<Respo
     return json({ ok: true, wallet, data: results });
   }
 
-  // POST /api/auth/wallet — wallet signature → JWT session token (1 hour)
+  // GET /api/siwe/nonce — generate a one-time nonce for SIWE signing
+  if (url.pathname === "/api/siwe/nonce" && request.method === "GET") {
+    const nonce = generateNonce();
+    const now = Math.floor(Date.now() / 1000);
+    // Store nonce, clean expired ones opportunistically
+    await env.DB.batch([
+      env.DB.prepare(`INSERT INTO siwe_nonces (nonce, created_at) VALUES (?, ?)`).bind(nonce, now),
+      env.DB.prepare(`DELETE FROM siwe_nonces WHERE created_at < ?`).bind(now - SIWE_NONCE_TTL),
+    ]);
+    return json({ ok: true, nonce });
+  }
+
+  // POST /api/auth/wallet — SIWE signature → JWT session token (24 hours)
   if (url.pathname === "/api/auth/wallet" && request.method === "POST") {
     const signingKey = await getSigningKey(env);
     if (!signingKey) {
@@ -884,26 +925,57 @@ async function handleT20API(request: Request, url: URL, env: Env): Promise<Respo
     }
 
     try {
-      const body = await request.json() as { wallet?: string; signature?: string; timestamp?: number };
+      const body = await request.json() as { wallet?: string; signature?: string; message?: string };
       const wallet = (body.wallet || "").toLowerCase();
       const signature = body.signature || "";
-      const ts = body.timestamp;
+      const message = body.message || "";
 
       if (!wallet || !/^0x[a-f0-9]{40}$/.test(wallet)) {
         return json({ error: "Invalid wallet address" }, 400);
       }
-      if (!signature || !ts || typeof ts !== "number") {
-        return json({ error: "signature and timestamp required" }, 400);
+      if (!signature || !message) {
+        return json({ error: "signature and message required" }, 400);
       }
 
-      const now = Math.floor(Date.now() / 1000);
-      if (Math.abs(now - ts) > 300) {
-        return json({ error: "Timestamp expired (5 minute window)" }, 400);
+      // Parse and validate SIWE message
+      const siwe = parseSiweMessage(message);
+      if (!siwe) {
+        return json({ error: "Invalid SIWE message format" }, 400);
+      }
+      if (siwe.domain !== SIWE_DOMAIN) {
+        return json({ error: "Domain mismatch" }, 403);
+      }
+      if (siwe.address.toLowerCase() !== wallet) {
+        return json({ error: "Address mismatch" }, 403);
+      }
+      if (siwe.chainId !== SIWE_CHAIN_ID) {
+        return json({ error: "Chain ID mismatch" }, 403);
+      }
+      if (siwe.uri !== SIWE_URI) {
+        return json({ error: "URI mismatch" }, 403);
+      }
+      if (siwe.version !== SIWE_VERSION) {
+        return json({ error: "Version mismatch" }, 403);
       }
 
+      // Verify issuedAt is within 5 minutes
+      const issuedAt = new Date(siwe.issuedAt).getTime();
+      if (isNaN(issuedAt) || Math.abs(Date.now() - issuedAt) > SIWE_NONCE_TTL * 1000) {
+        return json({ error: "Message expired" }, 400);
+      }
+
+      // Verify nonce exists and consume it (one-time use)
+      const nonceRow = await env.DB.prepare(
+        `DELETE FROM siwe_nonces WHERE nonce = ? AND created_at > ? RETURNING nonce`
+      ).bind(siwe.nonce, Math.floor(Date.now() / 1000) - SIWE_NONCE_TTL).first<{ nonce: string }>();
+      if (!nonceRow) {
+        return json({ error: "Invalid or expired nonce" }, 403);
+      }
+
+      // Verify wallet signature
       const valid = await verifyMessage({
         address: wallet as Address,
-        message: `nous-token:auth:${wallet}:${ts}`,
+        message,
         signature: signature as Hex,
       });
       if (!valid) {
@@ -911,6 +983,7 @@ async function handleT20API(request: Request, url: URL, env: Env): Promise<Respo
       }
 
       // Issue JWT — 24 hour expiry
+      const now = Math.floor(Date.now() / 1000);
       const jwt = await createWalletJWT(env, wallet, now + 86400);
       return json({ ok: true, token: jwt, wallet, expires_in: 86400 });
     } catch {
@@ -1187,16 +1260,15 @@ function timingSafeEqual(a: string, b: string): boolean {
 }
 
 // ── JWT Helpers (compact, HMAC-based) ──
-// HMAC key derived deterministically from SIGNING_KEY's raw bytes via SHA-256.
-// ECDSA signing is non-deterministic (random k), so we export the key and hash it instead.
+// Uses independent JWT_SECRET — fully decoupled from SIGNING_KEY (receipt signatures).
 
 let cachedHmacKey: CryptoKey | null = null;
 
 async function getHmacKey(env: Env): Promise<CryptoKey | null> {
   if (cachedHmacKey) return cachedHmacKey;
-  if (!env.SIGNING_KEY) return null;
-  // Derive HMAC key deterministically from the JWK string (never changes for same key)
-  const seed = new TextEncoder().encode("nous-token-jwt:" + env.SIGNING_KEY);
+  const jwtSecret = (env as Record<string, unknown>).JWT_SECRET as string | undefined;
+  if (!jwtSecret) return null;
+  const seed = new TextEncoder().encode(jwtSecret);
   const hashBuf = await crypto.subtle.digest("SHA-256", seed);
   cachedHmacKey = await crypto.subtle.importKey(
     "raw", hashBuf, { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"]
@@ -1209,7 +1281,7 @@ async function createWalletJWT(env: Env, wallet: string, exp: number): Promise<s
   const payload = btoa(JSON.stringify({ sub: wallet, exp })).replace(/=+$/, "");
   const data = `${header}.${payload}`;
   const hmacKey = await getHmacKey(env);
-  if (!hmacKey) throw new Error("SIGNING_KEY not configured");
+  if (!hmacKey) throw new Error("JWT_SECRET not configured");
   const sigBuf = await crypto.subtle.sign("HMAC", hmacKey, new TextEncoder().encode(data));
   const sig = btoa(String.fromCharCode(...new Uint8Array(sigBuf))).replace(/=+$/, "").replace(/\+/g, "-").replace(/\//g, "_");
   return `${data}.${sig}`;
