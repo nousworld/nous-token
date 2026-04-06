@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-GCXCwMWh69gJljQloTEnji/NeA/oIj7WBYQq1TNMH/g='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://gateway.nousai.cc https://mainnet.base.org; img-src 'self' data:; frame-ancestors 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-ACXrkhOZO0Y7DcekzPn4bnGEooY+OMJAyfmhlE9Kvpc='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://gateway.nousai.cc https://mainnet.base.org; img-src 'self' data:; frame-ancestors 'none'">
 <meta http-equiv="X-Frame-Options" content="DENY">
 <title>NOUS Token — AI Compute Proofs on Base</title>
 <meta name="description" content="Everything you spend on AI becomes an asset you own. Verifiable AI compute proofs on Base.">
@@ -186,12 +186,12 @@ footer a:hover { text-decoration:underline; }
       <a href="https://github.com/nousworld/nous-token" target="_blank">GitHub</a>
       <a href="https://github.com/nousworld/nous-token/blob/main/PROTOCOL.md" target="_blank">Protocol</a>
       <div class="wallet-dropdown" id="walletDropdown">
-        <button class="wallet-btn" id="walletBtn" onclick="connectWallet()">Connect</button>
+        <button class="wallet-btn" id="walletBtn">Connect</button>
         <div class="wallet-menu" id="walletMenu">
           <div class="wallet-menu-header" id="walletMenuAddr"></div>
-          <div class="wallet-menu-item" onclick="showTab('proofs');closeWalletMenu()">My Proofs</div>
-          <div class="wallet-menu-item" onclick="lookupFromBoard(myWallet);closeWalletMenu()">My Usage</div>
-          <div class="wallet-menu-item danger" onclick="disconnectWallet()">Disconnect</div>
+          <div class="wallet-menu-item" id="menuProofs">My Proofs</div>
+          <div class="wallet-menu-item" id="menuUsage">My Usage</div>
+          <div class="wallet-menu-item danger" id="menuDisconnect">Disconnect</div>
         </div>
       </div>
     </div>
@@ -223,20 +223,20 @@ footer a:hover { text-decoration:underline; }
 </div>
 
 <div class="tabs">
-  <div class="tab active" onclick="showTab('leaderboard')">Leaderboard</div>
-  <div class="tab" onclick="showTab('models')">Models</div>
-  <div class="tab" onclick="showTab('series')">Series</div>
-  <div class="tab" onclick="showTab('proofs')">My Proofs</div>
-  <div class="tab" onclick="showTab('lookup')">Look Up</div>
-  <div class="tab" onclick="showTab('setup')">Setup</div>
+  <div class="tab active" data-tab="leaderboard">Leaderboard</div>
+  <div class="tab" data-tab="models">Models</div>
+  <div class="tab" data-tab="series">Series</div>
+  <div class="tab" data-tab="proofs">My Proofs</div>
+  <div class="tab" data-tab="lookup">Look Up</div>
+  <div class="tab" data-tab="setup">Setup</div>
 </div>
 
 <div class="content">
   <!-- Leaderboard -->
   <div class="section active" id="sec-leaderboard">
     <div class="period-row">
-      <button class="period-btn active" onclick="setPeriod(30,this)">30d</button>
-      <button class="period-btn" onclick="setPeriod(0,this)">All Time</button>
+      <button class="period-btn active" data-period="30">30d</button>
+      <button class="period-btn" data-period="0">All Time</button>
     </div>
     <div id="leaderboardContent"><div class="loading">Loading...</div></div>
   </div>
@@ -244,8 +244,8 @@ footer a:hover { text-decoration:underline; }
   <!-- Models -->
   <div class="section" id="sec-models">
     <div class="period-row">
-      <button class="period-btn active" onclick="setModelPeriod(30,this)">30d</button>
-      <button class="period-btn" onclick="setModelPeriod(0,this)">All Time</button>
+      <button class="period-btn active" data-model-period="30">30d</button>
+      <button class="period-btn" data-model-period="0">All Time</button>
     </div>
     <div id="modelsContent"><div class="loading">Loading...</div></div>
   </div>
@@ -265,7 +265,7 @@ footer a:hover { text-decoration:underline; }
   <!-- Lookup -->
   <div class="section" id="sec-lookup">
     <div class="search-row">
-      <input class="search-input" id="lookupInput" placeholder="Enter wallet address (0x...) or user hash..." onkeydown="if(event.key==='Enter')lookupUser()">
+      <input class="search-input" id="lookupInput" placeholder="Enter wallet address (0x...) or user hash...">
     </div>
     <div id="lookupContent">
       <div style="text-align:center;padding:40px;color:var(--sage)">
@@ -290,22 +290,22 @@ footer a:hover { text-decoration:underline; }
       <div style="margin-top:28px;padding-top:24px;border-top:1px solid var(--silk)">
         <div style="font-size:13px;color:var(--sage);margin-bottom:12px">Look up your wallet:</div>
         <div style="display:flex;gap:8px;justify-content:center;max-width:400px;margin:0 auto">
-          <input class="search-input" id="setupWalletInput" placeholder="0x..." style="font-size:13px" onkeydown="if(event.key==='Enter')lookupFromBoard(this.value.trim())">
-          <button class="btn" style="white-space:nowrap;padding:10px 20px" onclick="lookupFromBoard(document.getElementById('setupWalletInput').value.trim())">Look Up</button>
+          <input class="search-input" id="setupWalletInput" placeholder="0x..." style="font-size:13px">
+          <button class="btn" style="white-space:nowrap;padding:10px 20px" id="setupLookupBtn">Look Up</button>
         </div>
       </div>
     </div>
   </div>
 </div>
 
-<div class="modal-overlay" id="walletModal" onclick="if(event.target===this)closeModal()">
+<div class="modal-overlay" id="walletModal">
   <div class="modal">
-    <button class="modal-close" onclick="closeModal()">&times;</button>
+    <button class="modal-close" id="modalCloseBtn">&times;</button>
     <div class="modal-title">Connect wallet</div>
     <div style="font-size:13px;color:var(--sage);margin-bottom:20px">Connect your wallet to view your proofs and inscribe new ones.</div>
-    <input class="search-input" id="modalWalletInput" placeholder="0x..." style="font-size:14px;margin-bottom:12px" onkeydown="if(event.key==='Enter')submitModal()">
+    <input class="search-input" id="modalWalletInput" placeholder="0x..." style="font-size:14px;margin-bottom:12px">
     <label style="display:flex;align-items:flex-start;gap:8px;font-size:12px;color:var(--sage);margin-bottom:16px;cursor:pointer"><input type="checkbox" id="tosConsent" style="margin-top:2px;accent-color:var(--teal)"><span>I agree to the <a href="/terms.html" target="_blank">Terms of Service</a> and <a href="/privacy.html" target="_blank">Privacy Notice</a></span></label>
-    <button class="btn" style="width:100%" onclick="submitModal()">Connect</button>
+    <button class="btn" style="width:100%" id="modalSubmitBtn">Connect</button>
   </div>
 </div>
 
@@ -417,7 +417,7 @@ async function loadLeaderboard(days){
       var row=d.data[i];var rc=i<3?' rank-'+(i+1):'';var id=row.identity||row.user_hash;
       var pct=Math.round((row.total_tokens/max)*100);var mine=isMyRow(id);
       if(mine)myRank=i+1;
-      html+='<tr onclick="lookupFromBoard(\''+esc(id)+'\')" class="'+(mine?'my-row':'')+'" style="cursor:pointer;animation-delay:'+(i*0.04)+'s">'
+      html+='<tr data-lookup="'+esc(id)+'" class="'+(mine?'my-row':'')+'" style="cursor:pointer;animation-delay:'+(i*0.04)+'s">'
         +'<td class="rank'+rc+'">'+(i+1)+'</td>'
         +'<td class="'+idClass(id)+'" title="'+esc(id)+'">'+esc(fmtId(id))+(mine?' (you)':'')+'</td>'
         +'<td class="tokens">'+formatNumber(row.total_tokens)+'</td>'
@@ -471,7 +471,7 @@ async function loadSeries(){
 
 function seriesCard(id,name,model,maxSupply,threshold,fee,minted){
   var feeStr=(fee/1e6).toFixed(2);
-  return '<div class="series-card" onclick="showInscribeModal('+id+',\''+esc(name)+'\',\''+esc(model)+'\','+threshold+','+fee+')">'
+  return '<div class="series-card" data-inscribe="'+id+'" data-name="'+esc(name)+'" data-model="'+esc(model)+'" data-threshold="'+threshold+'" data-fee="'+fee+'">'
     +'<div class="series-card-name">'+esc(name)+'</div>'
     +'<div class="series-card-model">'+esc(model)+'</div>'
     +'<div class="series-card-row"><span>Supply</span><span>'+minted+' / '+formatNumber(maxSupply)+'</span></div>'
@@ -486,11 +486,11 @@ function showInscribeModal(seriesId,name,model,threshold,fee){
   var feeStr=(fee/1e6).toFixed(2);
   var modal=document.getElementById('walletModal');
   var inner=modal.querySelector('.modal');
-  inner.innerHTML='<button class="modal-close" onclick="closeModal()">&times;</button>'
+  inner.innerHTML='<button class="modal-close" data-close-modal>&times;</button>'
     +'<div class="modal-title">Inscribe: '+esc(name)+'</div>'
     +'<div style="font-size:13px;color:var(--sage);margin-bottom:16px">Model: '+esc(model)+'<br>Threshold: '+formatNumber(threshold)+' tokens<br>Fee: '+feeStr+' USDC</div>'
     +'<div style="font-size:12px;color:var(--sage);margin-bottom:20px">You need a valid gateway receipt with at least '+formatNumber(threshold)+' tokens to inscribe. The gateway will handle the proof construction.</div>'
-    +'<button class="btn" style="width:100%" id="inscribeBtn" onclick="doInscribe('+seriesId+','+fee+')">Approve USDC &amp; Inscribe</button>';
+    +'<button class="btn" style="width:100%" id="inscribeBtn" data-do-inscribe="'+seriesId+'" data-fee="'+fee+'">Approve USDC &amp; Inscribe</button>';
   modal.classList.add('active');
 }
 
@@ -510,13 +510,10 @@ async function loadMyProofs(){
   var el=document.getElementById('proofsContent');
   if(!myWallet){el.innerHTML='<div class="loading">Connect wallet to see your proofs.</div>';return;}
 
-  // Check JWT — if expired, show re-auth prompt
+  // JWT expired — don't try to re-sign here, just tell user to reconnect
   if(!isJWTValid()){
-    if(!window.ethereum){
-      el.innerHTML='<div class="loading">Session expired. Reconnect wallet to view proofs.</div>';
-      return;
-    }
-    el.innerHTML='<div class="loading">Session expired.<br><button class="btn" style="margin-top:12px" onclick="reauth()">Sign to continue</button></div>';
+    el.innerHTML='<div class="loading">Session expired. Please reconnect wallet.</div>';
+    disconnectWallet();
     return;
   }
 
@@ -524,9 +521,9 @@ async function loadMyProofs(){
   try{
     var r=await fetch(API+'/api/t20/my-receipts',{headers:{'Authorization':'Bearer '+walletJWT}});
     if(r.status===401){
-      // JWT rejected server-side — clear and prompt
-      walletJWT='';sessionStorage.removeItem('nous_jwt');
-      el.innerHTML='<div class="loading">Session expired.<br><button class="btn" style="margin-top:12px" onclick="reauth()">Sign to continue</button></div>';
+      // JWT rejected server-side — disconnect and prompt reconnect
+      disconnectWallet();
+      el.innerHTML='<div class="loading">Session expired. Please reconnect wallet.</div>';
       return;
     }
     var d=await r.json();
@@ -591,13 +588,11 @@ function idClass(id){return isWallet(id)?'user-hash wallet-addr':'user-hash';}
 
 // ── Wallet + JWT Session ──
 var _stored = localStorage.getItem('nous_wallet') || '';
-var walletJWT = sessionStorage.getItem('nous_jwt') || '';
-var jwtExpiry = parseInt(sessionStorage.getItem('nous_jwt_exp') || '0', 10);
-// Only restore wallet if JWT is still valid — otherwise require re-auth
-var myWallet = '';
-if(/^0x[a-f0-9]{40}$/i.test(_stored) && walletJWT && Date.now()/1000 < jwtExpiry - 30){
-  myWallet = _stored.toLowerCase();
-}
+var walletJWT = localStorage.getItem('nous_jwt') || '';
+var jwtExpiry = parseInt(localStorage.getItem('nous_jwt_exp') || '0', 10);
+// Restore wallet from localStorage (for display, leaderboard highlighting).
+// JWT may be expired — will be silently renewed when needed (My Proofs, inscribe).
+var myWallet = /^0x[a-f0-9]{40}$/i.test(_stored) ? _stored.toLowerCase() : '';
 
 function isJWTValid(){ return walletJWT && Date.now()/1000 < jwtExpiry - 30; } // 30s buffer
 
@@ -616,8 +611,8 @@ async function authenticateWallet(wallet){
     if(d.ok && d.token){
       walletJWT = d.token;
       jwtExpiry = Math.floor(Date.now()/1000) + d.expires_in;
-      sessionStorage.setItem('nous_jwt', walletJWT);
-      sessionStorage.setItem('nous_jwt_exp', String(jwtExpiry));
+      localStorage.setItem('nous_jwt', walletJWT);
+      localStorage.setItem('nous_jwt_exp', String(jwtExpiry));
       return true;
     }
   }catch(e){console.error('Auth failed:',e);}
@@ -660,19 +655,20 @@ function updateWalletBtn(){
   var btn=document.getElementById('walletBtn');
   if(myWallet){
     btn.textContent=myWallet.slice(0,6)+'...'+myWallet.slice(-4);
-    btn.classList.add('connected');btn.onclick=toggleWalletMenu;
+    btn.classList.add('connected');
+    btn._action='menu';
     document.getElementById('walletMenuAddr').textContent=myWallet;
   } else {
     btn.textContent='Connect';btn.classList.remove('connected');
-    btn.onclick=connectWallet;closeWalletMenu();
+    btn._action='connect';
+    closeWalletMenu();
   }
 }
 
 function toggleWalletMenu(){document.getElementById('walletMenu').classList.toggle('active');}
 function closeWalletMenu(){document.getElementById('walletMenu').classList.remove('active');}
-function disconnectWallet(){myWallet='';walletJWT='';jwtExpiry=0;localStorage.removeItem('nous_wallet');sessionStorage.removeItem('nous_jwt');sessionStorage.removeItem('nous_jwt_exp');closeWalletMenu();updateWalletBtn();loadLeaderboard(currentPeriod);}
+function disconnectWallet(){myWallet='';walletJWT='';jwtExpiry=0;localStorage.removeItem('nous_wallet');localStorage.removeItem('nous_jwt');localStorage.removeItem('nous_jwt_exp');closeWalletMenu();updateWalletBtn();loadLeaderboard(currentPeriod);}
 async function reauth(){if(await ensureAuth()){loadMyProofs();}else{alert('Signature required to view proofs.');}}
-document.addEventListener('click',function(e){if(!document.getElementById('walletDropdown').contains(e.target))closeWalletMenu();});
 function isMyRow(id){return myWallet&&id.toLowerCase()===myWallet;}
 function openModal(){document.getElementById('walletModal').classList.add('active');document.getElementById('modalWalletInput').focus();}
 function closeModal(){document.getElementById('walletModal').classList.remove('active');}
@@ -687,6 +683,64 @@ function submitModal(){
   else{var inp=document.getElementById('modalWalletInput');inp.style.borderColor='var(--amber)';setTimeout(function(){inp.style.borderColor='';},1500);}
 }
 updateWalletBtn();
+
+// ── Event Listeners (no inline handlers — CSP compliant) ──
+
+// Wallet button: connect or toggle menu
+document.getElementById('walletBtn').addEventListener('click',function(){
+  if(this._action==='menu') toggleWalletMenu(); else connectWallet();
+});
+// Wallet menu items
+document.getElementById('menuProofs').addEventListener('click',function(){showTab('proofs');closeWalletMenu();});
+document.getElementById('menuUsage').addEventListener('click',function(){lookupFromBoard(myWallet);closeWalletMenu();});
+document.getElementById('menuDisconnect').addEventListener('click',disconnectWallet);
+
+// Tabs
+document.querySelector('.tabs').addEventListener('click',function(e){
+  var tab=e.target.dataset.tab; if(tab) showTab(tab);
+});
+
+// Period buttons (leaderboard)
+document.querySelector('#sec-leaderboard .period-row').addEventListener('click',function(e){
+  var p=e.target.dataset.period; if(p!==undefined) setPeriod(parseInt(p),e.target);
+});
+// Period buttons (models)
+document.querySelector('#sec-models .period-row').addEventListener('click',function(e){
+  var p=e.target.dataset.modelPeriod; if(p!==undefined) setModelPeriod(parseInt(p),e.target);
+});
+
+// Lookup input enter
+document.getElementById('lookupInput').addEventListener('keydown',function(e){if(e.key==='Enter')lookupUser();});
+
+// Setup wallet lookup
+document.getElementById('setupWalletInput').addEventListener('keydown',function(e){if(e.key==='Enter')lookupFromBoard(this.value.trim());});
+document.getElementById('setupLookupBtn').addEventListener('click',function(){lookupFromBoard(document.getElementById('setupWalletInput').value.trim());});
+
+// Modal: close on overlay click, close button, enter key, submit
+document.getElementById('walletModal').addEventListener('click',function(e){if(e.target===this)closeModal();});
+document.getElementById('modalCloseBtn').addEventListener('click',closeModal);
+document.getElementById('modalWalletInput').addEventListener('keydown',function(e){if(e.key==='Enter')submitModal();});
+document.getElementById('modalSubmitBtn').addEventListener('click',submitModal);
+
+// Document click to close wallet menu
+document.addEventListener('click',function(e){if(!document.getElementById('walletDropdown').contains(e.target))closeWalletMenu();});
+
+// Event delegation for dynamically generated content
+document.addEventListener('click',function(e){
+  // Leaderboard row click
+  var row=e.target.closest('[data-lookup]');
+  if(row){lookupFromBoard(row.dataset.lookup);return;}
+  // Series card click
+  var card=e.target.closest('[data-inscribe]');
+  if(card){showInscribeModal(parseInt(card.dataset.inscribe),card.dataset.name,card.dataset.model,parseInt(card.dataset.threshold),parseInt(card.dataset.fee));return;}
+  // Dynamic close modal button
+  if(e.target.closest('[data-close-modal]')){closeModal();return;}
+  // Dynamic inscribe button
+  var ib=e.target.closest('[data-do-inscribe]');
+  if(ib){doInscribe(parseInt(ib.dataset.doInscribe),parseInt(ib.dataset.fee));return;}
+  // Dynamic reauth button
+  if(e.target.closest('[data-reauth]')){reauth();return;}
+});
 
 // ── Init ──
 loadStats();loadLeaderboard(30);

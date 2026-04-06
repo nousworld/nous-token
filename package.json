@@ -15,6 +15,10 @@
     "README.md",
     "PROTOCOL.md"
   ],
+  "scripts": {
+    "deploy:web": "node web/update-csp.mjs && npx wrangler pages deploy web --project-name=nous-token-web --commit-dirty=true",
+    "deploy:gateway": "cd gateway && npx wrangler deploy"
+  },
   "openclaw": {
     "extensions": ["./index.ts"]
   },
