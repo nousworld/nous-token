@@ -3,18 +3,25 @@ pragma solidity ^0.8.24;
 
 import "forge-std/Test.sol";
 import "../src/Token20.sol";
+import "./DeployHelper.sol";
 
 contract MockUSDC {
     string public name = "USD Coin";
     uint8 public decimals = 6;
     mapping(address => uint256) public balanceOf;
     mapping(address => mapping(address => uint256)) public allowance;
+    mapping(address => bool) public blacklisted;
 
     function mint(address to, uint256 amount) external {
         balanceOf[to] += amount;
     }
 
+    function setBlacklist(address addr, bool val) external {
+        blacklisted[addr] = val;
+    }
+
     function transfer(address to, uint256 value) external returns (bool) {
+        if (blacklisted[msg.sender] || blacklisted[to]) return false;
         if (balanceOf[msg.sender] < value) return false;
         balanceOf[msg.sender] -= value;
         balanceOf[to] += value;
@@ -27,7 +34,7 @@ contract MockUSDC {
     }
 
     function transferFrom(address from, address to, uint256 value) external returns (bool) {
-        // Strict: always check allowance, same as real USDC
+        if (blacklisted[from] || blacklisted[to]) return false;
         if (allowance[from][msg.sender] < value) return false;
         if (balanceOf[from] < value) return false;
         allowance[from][msg.sender] -= value;
@@ -37,17 +44,10 @@ contract MockUSDC {
     }
 
     function transferWithAuthorization(
-        address from,
-        address to,
-        uint256 value,
-        uint256, // validAfter
-        uint256, // validBefore
-        bytes32, // nonce
-        uint8,   // v
-        bytes32, // r
-        bytes32  // s
+        address from, address to, uint256 value,
+        uint256, uint256, bytes32, uint8, bytes32, bytes32
     ) external {
-        // EIP-3009: value must match exactly what was signed
+        require(!blacklisted[from] && !blacklisted[to], "Blacklisted");
         require(balanceOf[from] >= value, "Insufficient balance");
         balanceOf[from] -= value;
         balanceOf[to] += value;
@@ -59,6 +59,7 @@ contract Token20Test is Test {
     MockUSDC public usdc;
 
     address owner = address(this);
+    address treasuryAddr = address(0x7EEE);
     address alice = address(0xA11CE);
     address bob = address(0xB0B);
     address creator = address(0xC4EA704);
@@ -70,11 +71,10 @@ contract Token20Test is Test {
         gatewayPk = 0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef;
         gateway = vm.addr(gatewayPk);
 
-        // Set block number high enough for anchor periods
         vm.roll(1000);
 
         usdc = new MockUSDC();
-        token = new Token20(address(usdc));
+        token = DeployHelper.deployToken20(address(usdc), treasuryAddr, address(this));
 
         token.registerGateway(gateway);
 
@@ -113,12 +113,12 @@ contract Token20Test is Test {
 
     function _anchorAndGetProof(bytes memory receipt) internal returns (bytes32[] memory, uint256) {
         bytes32 receiptHash = keccak256(receipt);
-        uint256 periodStart = 300; // aligned to anchorInterval
+        uint256 periodStart = 300;
 
         vm.prank(gateway);
         token.anchor(periodStart, receiptHash, 1);
 
-        bytes32[] memory proof = new bytes32[](0); // single leaf, no siblings
+        bytes32[] memory proof = new bytes32[](0);
         return (proof, periodStart);
     }
 
@@ -128,7 +128,6 @@ contract Token20Test is Test {
         bytes32 hash1 = keccak256(receipt1);
         bytes32 hash2 = keccak256(receipt2);
 
-        // Sort for OpenZeppelin MerkleProof compatibility
         bytes32 left;
         bytes32 right;
         if (hash1 < hash2) { left = hash1; right = hash2; }
@@ -140,11 +139,9 @@ contract Token20Test is Test {
         vm.prank(gateway);
         token.anchor(periodStart, root, 2);
 
-        // Proof for hash1: sibling is hash2
         proof1 = new bytes32[](1);
         proof1[0] = hash2;
 
-        // Proof for hash2: sibling is hash1
         proof2 = new bytes32[](1);
         proof2[0] = hash1;
     }
@@ -152,29 +149,17 @@ contract Token20Test is Test {
     // ─── Deploy Series Tests ───
 
     function test_deploySeries() public {
+        uint256 treasuryBefore = usdc.balanceOf(treasuryAddr);
         vm.startPrank(creator);
         usdc.approve(address(token), 5_000000);
         uint256 sid = token.deploy("Opus", "claude-4.6", 210000, 10000, Token20.SeriesMode.OPEN, 2_000000);
         vm.stopPrank();
 
         assertEq(sid, 1);
-        (
-            string memory name,,,
-            uint256 maxSupply,
-            uint256 mintThreshold,
-            Token20.SeriesMode mode,
-            address seriesCreator,
-            uint256 inscriptionFee,
-            uint256 minted
-        ) = token.series(sid);
-
-        assertEq(name, "Opus");
-        assertEq(maxSupply, 210000);
-        assertEq(mintThreshold, 10000);
-        assertEq(uint8(mode), uint8(Token20.SeriesMode.OPEN));
-        assertEq(seriesCreator, creator);
-        assertEq(inscriptionFee, 2_000000);
-        assertEq(minted, 0);
+        // Deploy fee goes directly to treasury
+        assertEq(usdc.balanceOf(treasuryAddr) - treasuryBefore, 5_000000);
+        // Contract holds zero
+        assertEq(usdc.balanceOf(address(token)), 0);
     }
 
     function test_deployDuplicateName_reverts() public {
@@ -220,6 +205,8 @@ contract Token20Test is Test {
 
         (,,,,,, address seriesCreator,,) = token.series(sid);
         assertEq(seriesCreator, alice);
+        // Deploy fee went to treasury
+        assertEq(usdc.balanceOf(address(token)), 0);
     }
 
     function test_deployWithAuth_wrongValue_reverts() public {
@@ -239,6 +226,8 @@ contract Token20Test is Test {
         bytes memory sig = _signReceipt(receipt);
         (bytes32[] memory proof, uint256 period) = _anchorAndGetProof(receipt);
 
+        uint256 treasuryBefore = usdc.balanceOf(treasuryAddr);
+
         vm.startPrank(alice);
         usdc.approve(address(token), 1_000000);
         token.inscribe(sid, receipt, sig, proof, period);
@@ -246,6 +235,10 @@ contract Token20Test is Test {
 
         assertEq(token.ownerOf(1), alice);
         assertEq(token.receiptUsed(keccak256(receipt)), 10000);
+        // Fee = 1 USDC (min), all goes to treasury (no creator share at min fee)
+        assertEq(usdc.balanceOf(treasuryAddr) - treasuryBefore, 1_000000);
+        // Contract holds zero
+        assertEq(usdc.balanceOf(address(token)), 0);
     }
 
     function test_inscribeMultipleFromSameReceipt() public {
@@ -367,6 +360,8 @@ contract Token20Test is Test {
         );
 
         assertEq(token.ownerOf(1), alice);
+        // Contract holds zero after inscribeWithAuth
+        assertEq(usdc.balanceOf(address(token)), 0);
     }
 
     function test_inscribeWithAuth_wrongValue_reverts() public {
@@ -437,111 +432,84 @@ contract Token20Test is Test {
         vm.stopPrank();
     }
 
-    // ─── Revenue Split Tests ───
+    // ─── Fee Distribution Tests (Push Model) ───
 
-    function test_revenueSplit() public {
-        // Fee = 2 USDC. Protocol gets 1 USDC, creator gets 1 USDC.
+    function test_feeDistribution_creatorGetsShare() public {
+        // Fee = 3 USDC. Protocol gets 1, creator gets 2.
         vm.startPrank(creator);
         usdc.approve(address(token), 5_000000);
-        uint256 sid = token.deploy("Premium", "claude-4.6", 100, 10000, Token20.SeriesMode.OPEN, 2_000000);
+        uint256 sid = token.deploy("Premium", "claude-4.6", 100, 10000, Token20.SeriesMode.OPEN, 3_000000);
         vm.stopPrank();
 
         bytes memory receipt = _makeReceipt(alice, "claude-4.6", 50000, 12345);
         bytes memory sig = _signReceipt(receipt);
         (bytes32[] memory proof, uint256 period) = _anchorAndGetProof(receipt);
 
+        uint256 treasuryBefore = usdc.balanceOf(treasuryAddr);
+        uint256 creatorBefore = usdc.balanceOf(creator);
+
         vm.startPrank(alice);
-        usdc.approve(address(token), 2_000000);
+        usdc.approve(address(token), 3_000000);
         token.inscribe(sid, receipt, sig, proof, period);
         vm.stopPrank();
 
-        // Creator balance: fee - PROTOCOL_FEE = 2_000000 - 1_000000 = 1_000000
-        assertEq(token.creatorBalance(creator), 1_000000);
-
-        // Claim
-        uint256 creatorBefore = usdc.balanceOf(creator);
-        vm.prank(creator);
-        token.claimCreatorFee();
-        assertEq(usdc.balanceOf(creator) - creatorBefore, 1_000000);
-        assertEq(token.creatorBalance(creator), 0);
+        // Treasury got protocol fee (1 USDC)
+        assertEq(usdc.balanceOf(treasuryAddr) - treasuryBefore, 1_000000);
+        // Creator got share (2 USDC)
+        assertEq(usdc.balanceOf(creator) - creatorBefore, 2_000000);
+        // Contract holds zero
+        assertEq(usdc.balanceOf(address(token)), 0);
     }
 
-    function test_revenueSplitMinFee() public {
+    function test_feeDistribution_minFeeNoCreatorShare() public {
         // At minimum fee (1 USDC = PROTOCOL_FEE), creator gets nothing
-        vm.startPrank(creator);
-        usdc.approve(address(token), 5_000000);
-        uint256 sid = token.deploy("MinFee", "claude-4.6", 100, 10000, Token20.SeriesMode.OPEN, 1_000000);
-        vm.stopPrank();
+        uint256 sid = _createTestSeries(); // 1 USDC fee
 
         bytes memory receipt = _makeReceipt(alice, "claude-4.6", 50000, 12345);
         bytes memory sig = _signReceipt(receipt);
         (bytes32[] memory proof, uint256 period) = _anchorAndGetProof(receipt);
+
+        uint256 creatorBefore = usdc.balanceOf(creator);
 
         vm.startPrank(alice);
         usdc.approve(address(token), 1_000000);
         token.inscribe(sid, receipt, sig, proof, period);
         vm.stopPrank();
 
-        assertEq(token.creatorBalance(creator), 0); // no creator share
+        // Creator balance unchanged
+        assertEq(usdc.balanceOf(creator), creatorBefore);
     }
 
-    function test_claimCreatorFeeNothingToClaim_reverts() public {
-        vm.prank(alice);
-        vm.expectRevert("Nothing to claim");
-        token.claimCreatorFee();
-    }
-
-    function test_claimCreatorFee_onlyCreatorCanClaim() public {
-        // Fee = 2 USDC. Creator gets 1 USDC (fee - PROTOCOL_FEE).
+    function test_feeDistribution_creatorBlacklisted_fallbackToTreasury() public {
+        // Creator is USDC-blacklisted — their share should go to treasury
         vm.startPrank(creator);
         usdc.approve(address(token), 5_000000);
-        uint256 sid = token.deploy("ClaimTest", "claude-4.6", 100, 10000, Token20.SeriesMode.OPEN, 2_000000);
+        uint256 sid = token.deploy("Blacklist", "claude-4.6", 100, 10000, Token20.SeriesMode.OPEN, 3_000000);
         vm.stopPrank();
 
         bytes memory receipt = _makeReceipt(alice, "claude-4.6", 50000, 12345);
         bytes memory sig = _signReceipt(receipt);
         (bytes32[] memory proof, uint256 period) = _anchorAndGetProof(receipt);
 
+        // Blacklist creator AFTER deploy
+        usdc.setBlacklist(creator, true);
+
+        uint256 treasuryBefore = usdc.balanceOf(treasuryAddr);
+
         vm.startPrank(alice);
-        usdc.approve(address(token), 2_000000);
+        usdc.approve(address(token), 3_000000);
         token.inscribe(sid, receipt, sig, proof, period);
         vm.stopPrank();
 
-        assertEq(token.creatorBalance(creator), 1_000000);
-
-        // Attacker (bob) tries to claim creator's fee — reverts
-        uint256 bobBefore = usdc.balanceOf(bob);
-        vm.prank(bob);
-        vm.expectRevert("Nothing to claim");
-        token.claimCreatorFee();
-        assertEq(usdc.balanceOf(bob), bobBefore);
-
-        // Attacker (alice, the inscriber) tries — also reverts
-        uint256 aliceBefore = usdc.balanceOf(alice);
-        vm.prank(alice);
-        vm.expectRevert("Nothing to claim");
-        token.claimCreatorFee();
-        assertEq(usdc.balanceOf(alice), aliceBefore);
-
-        // Owner tries — also reverts
-        vm.expectRevert("Nothing to claim");
-        token.claimCreatorFee();
-
-        // Creator's balance is still intact
-        assertEq(token.creatorBalance(creator), 1_000000);
-        assertEq(token.totalPendingCreatorFees(), 1_000000);
-
-        // Only creator can claim
-        uint256 creatorBefore = usdc.balanceOf(creator);
-        vm.prank(creator);
-        token.claimCreatorFee();
-        assertEq(usdc.balanceOf(creator) - creatorBefore, 1_000000);
-        assertEq(token.creatorBalance(creator), 0);
-        assertEq(token.totalPendingCreatorFees(), 0);
+        // All 3 USDC went to treasury (1 protocol + 2 creator fallback)
+        assertEq(usdc.balanceOf(treasuryAddr) - treasuryBefore, 3_000000);
+        // Inscribe succeeded — not blocked by creator blacklist
+        assertEq(token.ownerOf(1), alice);
+        // Contract holds zero
+        assertEq(usdc.balanceOf(address(token)), 0);
     }
 
-    function test_claimCreatorFee_multipleCreatorsIsolated() public {
-        // Fee = 2 USDC each. Each creator gets 1 USDC per inscribe.
+    function test_feeDistribution_multipleCreatorsIsolated() public {
         address creator2 = address(0xC4EA702);
         usdc.mint(creator2, 1000_000000);
 
@@ -559,15 +527,18 @@ contract Token20Test is Test {
         bytes memory sig1 = _signReceipt(receipt1);
         (bytes32[] memory proof1, uint256 period1) = _anchorAndGetProof(receipt1);
 
+        uint256 creator1Before = usdc.balanceOf(creator);
+        uint256 creator2Before = usdc.balanceOf(creator2);
+
         vm.startPrank(alice);
         usdc.approve(address(token), 4_000000);
         token.inscribe(sid1, receipt1, sig1, proof1, period1);
 
         bytes memory receipt2 = _makeReceipt(alice, "claude-4.6", 60000, 12346);
         bytes memory sig2 = _signReceipt(receipt2);
+        bytes32 hash2 = keccak256(receipt2);
         vm.stopPrank();
 
-        bytes32 hash2 = keccak256(receipt2);
         vm.prank(gateway);
         token.anchor(600, hash2, 1);
         bytes32[] memory proof2 = new bytes32[](0);
@@ -575,23 +546,9 @@ contract Token20Test is Test {
         vm.prank(alice);
         token.inscribe(sid2, receipt2, sig2, proof2, 600);
 
-        // Both creators have 1 USDC pending
-        assertEq(token.creatorBalance(creator), 1_000000);
-        assertEq(token.creatorBalance(creator2), 1_000000);
-        assertEq(token.totalPendingCreatorFees(), 2_000000);
-
-        // Creator1 claims — creator2's balance untouched
-        vm.prank(creator);
-        token.claimCreatorFee();
-        assertEq(token.creatorBalance(creator), 0);
-        assertEq(token.creatorBalance(creator2), 1_000000);
-        assertEq(token.totalPendingCreatorFees(), 1_000000);
-
-        // Creator2 claims
-        vm.prank(creator2);
-        token.claimCreatorFee();
-        assertEq(token.creatorBalance(creator2), 0);
-        assertEq(token.totalPendingCreatorFees(), 0);
+        // Each creator got 1 USDC (fee 2 - protocol 1)
+        assertEq(usdc.balanceOf(creator) - creator1Before, 1_000000);
+        assertEq(usdc.balanceOf(creator2) - creator2Before, 1_000000);
     }
 
     // ─── Anchor Tests ───
@@ -600,7 +557,6 @@ contract Token20Test is Test {
         bytes32 root = keccak256("test_root");
         vm.prank(gateway);
         token.anchor(300, root, 5);
-
         assertEq(token.anchors(300), root);
     }
 
@@ -705,7 +661,7 @@ contract Token20Test is Test {
         assertEq(remaining, 50000);
     }
 
-    // ─── Token URI Tests ───
+    // ─── Token URI Tests ���──
 
     function test_tokenURI() public {
         uint256 sid = _createTestSeries();
@@ -757,25 +713,21 @@ contract Token20Test is Test {
 
     // ─── Admin Tests ───
 
-    function test_withdraw() public {
-        vm.startPrank(creator);
-        usdc.approve(address(token), 5_000000);
-        token.deploy("WithdrawTest", "claude-4.6", 100, 10000, Token20.SeriesMode.OPEN, 1_000000);
-        vm.stopPrank();
-
-        uint256 contractBal = usdc.balanceOf(address(token));
-        assertEq(contractBal, 5_000000);
-
-        address treasury = address(0x7EEE);
-        token.withdraw(treasury, 3_000000);
-        assertEq(usdc.balanceOf(treasury), 3_000000);
-        assertEq(usdc.balanceOf(address(token)), 2_000000);
+    function test_setTreasury() public {
+        address newTreasury = address(0xBEEF);
+        token.setTreasury(newTreasury);
+        assertEq(token.treasury(), newTreasury);
     }
 
-    function test_withdrawNonOwner_reverts() public {
+    function test_setTreasuryZero_reverts() public {
+        vm.expectRevert("Treasury cannot be zero");
+        token.setTreasury(address(0));
+    }
+
+    function test_setTreasuryNonOwner_reverts() public {
         vm.prank(alice);
         vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", alice));
-        token.withdraw(alice, 1);
+        token.setTreasury(alice);
     }
 
     function test_setDeployFee() public {
@@ -798,7 +750,7 @@ contract Token20Test is Test {
         assertEq(token.anchorInterval(), 600);
     }
 
-    // ─── Authorization Events Tests ───
+    // ─── Authorization Events Tests ──��
 
     function test_authorizeEmitsEvent() public {
         vm.startPrank(creator);
@@ -872,11 +824,9 @@ contract Token20Test is Test {
 
         vm.startPrank(alice);
         usdc.approve(address(token), 2_000000);
-        // Exactly one mint
         token.inscribe(sid, receipt, sig, proof, period);
         assertEq(token.ownerOf(1), alice);
 
-        // No more
         vm.expectRevert("Insufficient receipt balance");
         token.inscribe(sid, receipt, sig, proof, period);
         vm.stopPrank();
@@ -888,8 +838,6 @@ contract Token20Test is Test {
         token.anchor(300, keccak256("root"), 5);
         assertEq(token.anchors(300), keccak256("root"));
     }
-
-    // ─── setAnchorInterval Tests ───
 
     function test_setAnchorIntervalZero_reverts() public {
         vm.expectRevert("Interval must be > 0");
@@ -920,15 +868,11 @@ contract Token20Test is Test {
     }
 
     function test_anchorTooOld_reverts() public {
-        // block.number is 1000, maxAnchorAge is 43200
-        // period 0 is 1000 blocks old — should pass
         vm.prank(gateway);
         token.anchor(0, keccak256("root"), 5);
 
-        // Set maxAnchorAge to 100 blocks
         token.setMaxAnchorAge(100);
 
-        // period 300 is 700 blocks old — should fail
         vm.prank(gateway);
         vm.expectRevert("Period too old");
         token.anchor(300, keccak256("root2"), 5);
@@ -976,15 +920,12 @@ contract Token20Test is Test {
 
         vm.startPrank(alice);
         usdc.approve(address(token), 1_000000);
-        vm.expectRevert(); // inscriptionFee is 0 for nonexistent series, transferFrom will fail
+        vm.expectRevert();
         token.inscribe(999, receipt, sig, proof, period);
         vm.stopPrank();
     }
 
-    // ─── Withdraw Boundary Tests ───
-
     function test_inscribeEmptyModel_reverts() public {
-        // Wildcard series + empty model receipt
         vm.startPrank(creator);
         usdc.approve(address(token), 5_000000);
         uint256 sid = token.deploy("WildCard2", "", 100, 10000, Token20.SeriesMode.OPEN, 1_000000);
@@ -1006,48 +947,27 @@ contract Token20Test is Test {
         token.renounceOwnership();
     }
 
-    function test_withdrawExceedsBalance_reverts() public {
+    // ─── Zero Balance Invariant ───
+
+    function test_contractHoldsZeroAfterOperations() public {
+        // Deploy + inscribe + inscribe = contract should always be at zero
         vm.startPrank(creator);
         usdc.approve(address(token), 5_000000);
-        token.deploy("WithdrawTest2", "claude-4.6", 100, 10000, Token20.SeriesMode.OPEN, 1_000000);
+        uint256 sid = token.deploy("ZeroTest", "claude-4.6", 100, 10000, Token20.SeriesMode.OPEN, 2_000000);
         vm.stopPrank();
-
-        vm.expectRevert("Exceeds protocol balance");
-        token.withdraw(owner, 10_000000);
-    }
-
-    function test_withdrawProtectsCreatorBalance() public {
-        // Fee = 2 USDC. Creator gets 1 USDC per inscribe.
-        vm.startPrank(creator);
-        usdc.approve(address(token), 5_000000);
-        uint256 sid = token.deploy("ProtectTest", "claude-4.6", 100, 10000, Token20.SeriesMode.OPEN, 2_000000);
-        vm.stopPrank();
+        assertEq(usdc.balanceOf(address(token)), 0);
 
         bytes memory receipt = _makeReceipt(alice, "claude-4.6", 50000, 12345);
         bytes memory sig = _signReceipt(receipt);
         (bytes32[] memory proof, uint256 period) = _anchorAndGetProof(receipt);
 
         vm.startPrank(alice);
-        usdc.approve(address(token), 2_000000);
+        usdc.approve(address(token), 10_000000);
         token.inscribe(sid, receipt, sig, proof, period);
+        assertEq(usdc.balanceOf(address(token)), 0);
+
+        token.inscribe(sid, receipt, sig, proof, period);
+        assertEq(usdc.balanceOf(address(token)), 0);
         vm.stopPrank();
-
-        // Contract has: 5 USDC (deploy) + 2 USDC (inscribe) = 7 USDC
-        // Creator pending: 1 USDC
-        // Protocol available: 7 - 1 = 6 USDC
-        assertEq(token.totalPendingCreatorFees(), 1_000000);
-
-        // Owner cannot withdraw more than protocol share
-        vm.expectRevert("Exceeds protocol balance");
-        token.withdraw(owner, 7_000000);
-
-        // Owner can withdraw protocol share
-        token.withdraw(owner, 6_000000);
-
-        // Creator can still claim
-        vm.prank(creator);
-        token.claimCreatorFee();
-        assertEq(token.creatorBalance(creator), 0);
-        assertEq(token.totalPendingCreatorFees(), 0);
     }
 }

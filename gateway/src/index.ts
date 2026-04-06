@@ -36,6 +36,7 @@ import {
   storeT20Receipt, getUnanchoredReceipts, storeT20Anchor,
   isAnchorPeriodDone, getReceiptProofData,
   getUnverifiedAnchors, markAnchorVerified, deleteFailedAnchor,
+  walletCache,
   type Env
 } from "./db";
 import {
@@ -168,14 +169,8 @@ export default {
           return json({ error: "X-Nous-Upstream must use HTTPS" }, 400);
         }
         // Block internal/private ranges (IPv4, IPv6, link-local, metadata)
-        const host = parsed.hostname.replace(/^\[|\]$/g, ""); // strip IPv6 brackets
-        if (host === "localhost" || host === "127.0.0.1" || host === "0.0.0.0"
-          || host === "::1" || host === "[::1]" || host === "0000:0000:0000:0000:0000:0000:0000:0001"
-          || host.startsWith("10.") || host.startsWith("192.168.") || host.startsWith("172.")
-          || host.startsWith("169.254.") || host.startsWith("fc") || host.startsWith("fd")
-          || host.startsWith("fe80") || host.startsWith("::ffff:127.")
-          || host.endsWith(".local") || host.endsWith(".internal")
-          || host === "metadata.google.internal" || host === "100.100.100.200") {
+        const host = parsed.hostname.replace(/^\[|\]$/g, "").toLowerCase(); // strip IPv6 brackets
+        if (isBlockedHost(host)) {
           return json({ error: "X-Nous-Upstream cannot target internal addresses" }, 400);
         }
         upstreamBase = parsed.origin;
@@ -260,47 +255,25 @@ export default {
     } else {
       const bodyBytes = await upstreamResponse.arrayBuffer();
 
-      // For non-streaming, try to attach X-Token20-Receipt header
-      let t20ReceiptHeader: string | null = null;
-
-      if (validWallet && env.GATEWAY_PRIVATE_KEY) {
-        try {
-          const text = new TextDecoder().decode(bodyBytes);
-          const parsed = JSON.parse(text) as Record<string, unknown>;
-          const usage = extractUsage(parsed);
-          if (usage && usage.totalTokens > 0) {
-            const receipt = await recordUsage(env.DB, userHash, providerName, usage, endpoint, signingKey ?? undefined, validWallet);
-            if (receipt) {
-              const signed = await generateT20Receipt(env, validWallet, usage, receipt.id);
-              if (signed) {
-                t20ReceiptHeader = formatReceiptHeader(signed);
+      // Record usage and generate T20 receipt in background to avoid blocking response.
+      // Receipt is stored in DB and retrievable via /api/t20/my-receipts.
+      ctx.waitUntil(
+        (async () => {
+          try {
+            const text = new TextDecoder().decode(bodyBytes);
+            const parsed = JSON.parse(text) as Record<string, unknown>;
+            const usage = extractUsage(parsed);
+            if (usage && usage.totalTokens > 0) {
+              const receipt = await recordUsage(env.DB, userHash, providerName, usage, endpoint, signingKey ?? undefined, validWallet);
+              if (validWallet && env.GATEWAY_PRIVATE_KEY && receipt) {
+                await generateT20Receipt(env, validWallet, usage, receipt.id);
               }
             }
+          } catch {
+            // Non-JSON response or no usage data — expected for non-chat endpoints
           }
-        } catch {
-          // Non-JSON response or no usage data — expected for non-chat endpoints
-        }
-      } else {
-        // No wallet or no gateway key — just record usage normally
-        ctx.waitUntil(
-          (async () => {
-            try {
-              const text = new TextDecoder().decode(bodyBytes);
-              const parsed = JSON.parse(text) as Record<string, unknown>;
-              const usage = extractUsage(parsed);
-              if (usage && usage.totalTokens > 0) {
-                await recordUsage(env.DB, userHash, providerName, usage, endpoint, signingKey ?? undefined, validWallet);
-              }
-            } catch {
-              // Non-JSON response or no usage data — expected for non-chat endpoints
-            }
-          })()
-        );
-      }
-
-      if (t20ReceiptHeader) {
-        responseHeaders.set("X-Token20-Receipt", t20ReceiptHeader);
-      }
+        })()
+      );
 
       return new Response(bodyBytes, {
         status: upstreamResponse.status,
@@ -638,7 +611,7 @@ async function handleAPI(request: Request, url: URL, env: Env): Promise<Response
     }
 
     try {
-      const body = await request.json() as { wallet?: string; signature?: string };
+      const body = await request.json() as { wallet?: string; signature?: string; timestamp?: number };
       const wallet = (body.wallet || "").toLowerCase();
       const signature = body.signature || "";
 
@@ -649,8 +622,16 @@ async function handleAPI(request: Request, url: URL, env: Env): Promise<Response
         return json({ error: "Signature required" }, 400);
       }
 
-      // Verify the wallet owner signed the binding message
-      const message = `nous-token:bind:${wallet}`;
+      // Verify the wallet owner signed the binding message with timestamp
+      // Message format: "nous-token:bind:{wallet}:{timestamp}"
+      // Timestamp must be within 5 minutes to prevent replay attacks
+      const bindTs = body.timestamp;
+      const now = Math.floor(Date.now() / 1000);
+      if (!bindTs || typeof bindTs !== "number" || Math.abs(now - bindTs) > 300) {
+        return json({ error: "Timestamp required and must be within 5 minutes" }, 400);
+      }
+
+      const message = `nous-token:bind:${wallet}:${bindTs}`;
       const valid = await verifyMessage({
         address: wallet as Address,
         message,
@@ -708,10 +689,13 @@ async function generateT20Receipt(
       ? env.GATEWAY_PRIVATE_KEY
       : "0x" + env.GATEWAY_PRIVATE_KEY) as Hex;
 
+    // Normalize model name: strip "provider/" prefix to match DB storage and on-chain series modelId
+    const normalizedModel = usage.model.includes("/") ? usage.model.split("/").pop()! : usage.model;
+
     const signed = await createSignedReceipt(
       pk,
       wallet as Address,
-      usage.model,
+      normalizedModel,
       usage.totalTokens,
       blockNumber
     );
@@ -813,16 +797,22 @@ async function handleT20API(request: Request, url: URL, env: Env): Promise<Respo
     // Auth method 1: Wallet signature (web)
     const walletAddr = (request.headers.get("x-wallet-address") || "").toLowerCase();
     const walletSig = request.headers.get("x-wallet-signature") || "";
+    const walletTs = request.headers.get("x-wallet-timestamp") || "";
     if (walletAddr && walletSig && /^0x[a-f0-9]{40}$/.test(walletAddr)) {
-      // Verify signature: user signed the message "token-20:my-receipts:{wallet}"
+      // Verify signature: user signed "token-20:my-receipts:{wallet}:{timestamp}"
+      // Timestamp must be within 5 minutes to prevent replay attacks
       try {
-        const { verifyMessage } = await import("viem");
-        const valid = await verifyMessage({
-          address: walletAddr as Address,
-          message: `token-20:my-receipts:${walletAddr}`,
-          signature: walletSig as Hex,
-        });
-        if (valid) wallet = walletAddr;
+        const ts = parseInt(walletTs, 10);
+        const now = Math.floor(Date.now() / 1000);
+        if (!isNaN(ts) && Math.abs(now - ts) <= 300) {
+          const { verifyMessage } = await import("viem");
+          const valid = await verifyMessage({
+            address: walletAddr as Address,
+            message: `token-20:my-receipts:${walletAddr}:${ts}`,
+            signature: walletSig as Hex,
+          });
+          if (valid) wallet = walletAddr;
+        }
       } catch { /* invalid sig */ }
     }
 
@@ -909,8 +899,8 @@ async function handleT20API(request: Request, url: URL, env: Env): Promise<Respo
       return json({ error: "ADMIN_SECRET not configured" }, 501);
     }
     const authHeader = request.headers.get("authorization") || "";
-    const token = authHeader.replace(/^Bearer\s+/i, "");
-    if (!token || token !== adminSecret) {
+    const bearerToken = authHeader.replace(/^Bearer\s+/i, "");
+    if (!bearerToken || !timingSafeEqual(bearerToken, adminSecret)) {
       return json({ error: "Unauthorized" }, 401);
     }
     const result = await handleAnchor(env);
@@ -930,7 +920,7 @@ function corsHeaders(request?: Request): Record<string, string> {
   return {
     "Access-Control-Allow-Origin": allowed,
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Api-Key, X-Goog-Api-Key, X-Nous-User, X-Nous-Upstream, X-Nous-Wallet, X-Wallet-Address, X-Wallet-Signature",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Api-Key, X-Goog-Api-Key, X-Nous-User, X-Nous-Upstream, X-Nous-Wallet, X-Wallet-Address, X-Wallet-Signature, X-Wallet-Timestamp",
     "Access-Control-Max-Age": "86400",
     "Vary": "Origin",
   };
@@ -958,6 +948,65 @@ async function authenticateCaller(request: Request): Promise<string | null> {
   const rawKey = authRaw.replace(/^Bearer\s+/i, "");
   if (!rawKey) return null;
   return sha256Short(rawKey);
+}
+
+// SSRF protection: block internal/private/metadata addresses
+// Covers RFC 1918, link-local, loopback, IPv4-mapped IPv6, cloud metadata
+function isBlockedHost(host: string): boolean {
+  // Loopback
+  if (host === "localhost" || host === "127.0.0.1" || host === "0.0.0.0"
+    || host === "::1" || host === "[::1]"
+    || host === "0000:0000:0000:0000:0000:0000:0000:0001") return true;
+
+  // RFC 1918 IPv4
+  if (host.startsWith("10.")) return true;
+  if (host.startsWith("192.168.")) return true;
+  // 172.16.0.0/12 = 172.16.x.x through 172.31.x.x (NOT all 172.x.x.x)
+  if (host.startsWith("172.")) {
+    const second = parseInt(host.split(".")[1], 10);
+    if (second >= 16 && second <= 31) return true;
+  }
+
+  // Link-local
+  if (host.startsWith("169.254.")) return true;
+
+  // IPv6 private/link-local
+  if (host.startsWith("fc") || host.startsWith("fd")) return true;  // ULA
+  if (host.startsWith("fe80")) return true;  // link-local
+
+  // IPv4-mapped IPv6 — catches ::ffff:10.x, ::ffff:127.x, ::ffff:192.168.x, ::ffff:172.16-31.x
+  const v4mapped = host.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+  if (v4mapped) return isBlockedHost(v4mapped[1]);
+  // Also catch full-form IPv4-mapped: 0:0:0:0:0:ffff:XXYY:ZZWW (hex octets)
+  const v4mappedFull = host.match(/^(?:0+:){5}ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+  if (v4mappedFull) {
+    const hi = parseInt(v4mappedFull[1], 16);
+    const lo = parseInt(v4mappedFull[2], 16);
+    const ip = `${hi >> 8}.${hi & 0xff}.${lo >> 8}.${lo & 0xff}`;
+    return isBlockedHost(ip);
+  }
+
+  // DNS suffixes
+  if (host.endsWith(".local") || host.endsWith(".internal")) return true;
+
+  // Cloud metadata endpoints
+  if (host === "metadata.google.internal") return true;
+  if (host === "100.100.100.200") return true;  // Alibaba Cloud
+
+  return false;
+}
+
+// Constant-time string comparison to prevent timing attacks
+function timingSafeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  const encoder = new TextEncoder();
+  const bufA = encoder.encode(a);
+  const bufB = encoder.encode(b);
+  let result = 0;
+  for (let i = 0; i < bufA.length; i++) {
+    result |= bufA[i] ^ bufB[i];
+  }
+  return result === 0;
 }
 
 // SHA-256, first 16 bytes as 32-char hex (matches plugin's hash)

@@ -211,6 +211,19 @@ if (wallet) {
   process.exit(0);
 }
 
+// Consent
+console.log("  \x1b[90mBy continuing, you agree to the Terms of Service and Privacy Notice:\x1b[0m");
+console.log("  \x1b[90mhttps://token.nousai.cc/terms.html\x1b[0m");
+console.log("  \x1b[90mhttps://token.nousai.cc/privacy.html\x1b[0m\n");
+console.log("  \x1b[90mThe gateway records AI usage metadata (model, token count, wallet).\x1b[0m");
+console.log("  \x1b[90mIt does NOT read or store your prompts or responses.\x1b[0m\n");
+const consent = await ask("  Continue? [Y/n] ");
+if (consent && consent.toLowerCase() !== "y" && consent.toLowerCase() !== "yes" && consent !== "") {
+  console.log("\n  Setup cancelled.\n");
+  process.exit(0);
+}
+console.log("");
+
 // Step 2: Configure tools
 console.log("  Scanning for AI tools...\n");
 

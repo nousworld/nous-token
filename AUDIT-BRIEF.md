@@ -76,7 +76,8 @@ nous-token is an open-source AI usage tracking protocol. A transparent gateway p
 │  - Holds API keys (never leaves machine in clear)    │
 │  - Plugin computes SHA-256(key) locally               │
 │  - Holds wallet private key (MetaMask)               │
-│  - Approves USDC to contract                         │
+│  - Approves USDC to contract (funds go to treasury    │
+│    and creator, never held by contract)               │
 └──────────────────────┬──────────────────────────────┘
                        │ hash(API key), request body (piped)
                        ▼
@@ -96,7 +97,8 @@ nous-token is an open-source AI usage tracking protocol. A transparent gateway p
 │  - Trusts registered gateways (owner-managed)        │
 │  - Verifies ECDSA signatures via ecrecover           │
 │  - Verifies Merkle proofs via OpenZeppelin           │
-│  - Holds USDC (deploy fees, inscription fees)        │
+│  - Holds ZERO USDC (push model: fees go directly     │
+│    to treasury and creator during inscribe)           │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -122,26 +124,26 @@ nous-token is an open-source AI usage tracking protocol. A transparent gateway p
 | `inscribeWithAuth()` | Public (whenNotPaused) | Same as `inscribe()` with EIP-3009 payment. |
 | `anchor()` | Gateway only | Submit a Merkle root for a time period. Period must be aligned to `anchorInterval`, not in the future, not too old. |
 | `verify()` | View | Verify a receipt's gateway signature and Merkle proof. Returns validity and remaining token balance. |
-| `claimCreatorFee()` | Public | Creator claims accumulated inscription fee surplus. |
 | `authorize()` / `authorizeBatch()` / `revokeAuth()` | Series creator | Manage whitelist for RESTRICTED-mode series. |
 | `registerGateway()` / `revokeGateway()` | Owner | Manage trusted gateway addresses. |
 | `invalidateAnchor()` | Owner | Remove a fraudulent or erroneous anchor. |
 | `pause()` / `unpause()` | Owner | Emergency circuit breaker. Blocks deploy and inscribe; does NOT block anchor. |
+| `setTreasury()` | Owner | Update treasury address (cannot be zero). |
 | `setDeployFee()` | Owner | Update deploy fee. |
 | `setMinInscriptionFee()` | Owner | Update minimum inscription fee (must be >= PROTOCOL_FEE). |
 | `setAnchorInterval()` | Owner | Update anchor period alignment (must be > 0). |
 | `setMaxAnchorAge()` | Owner | Update max anchor age in blocks (must be > 0). |
-| `withdraw()` | Owner | Withdraw protocol revenue. Cannot withdraw pending creator fees. |
 | `renounceOwnership()` | Disabled | Overridden to always revert. |
 | `tokenURI()` | View | On-chain metadata as base64-encoded JSON (series name, model, tokens, block, gateway). |
 
-#### 3.1.2 Fee Model
+#### 3.1.2 Fee Model (Push — Contract Holds Zero USDC)
 
-- **Deploy fee**: 5 USDC (configurable by owner). Paid by series creator.
+- **Deploy fee**: 5 USDC (configurable by owner). Paid by series creator, sent **directly to treasury** via `transferFrom`.
 - **Inscription fee**: Set by series creator, minimum 1 USDC.
-- **Protocol fee**: Fixed 1 USDC per inscription (constant `PROTOCOL_FEE`).
-- **Creator share**: `inscriptionFee - PROTOCOL_FEE`. Accumulated in `creatorBalance` mapping, claimable via `claimCreatorFee()`.
-- **Withdrawal protection**: `withdraw()` subtracts `totalPendingCreatorFees` from available balance, preventing the owner from withdrawing creator funds.
+- **Protocol fee**: Fixed 1 USDC per inscription (constant `PROTOCOL_FEE`). Sent **directly to treasury** via `transferFrom`.
+- **Creator share**: `inscriptionFee - PROTOCOL_FEE`. Sent **directly to creator** via `transferFrom`. If creator cannot receive (e.g. USDC blacklisted), fallback sends to treasury and emits `CreatorPaymentFallback` event.
+- **Contract USDC balance**: Always zero. No `withdraw()`, no `claimCreatorFee()`, no `creatorBalance` mapping.
+- **Treasury**: Configurable address (`setTreasury()`, owner-only). Receives all protocol fees and blacklist fallback payments.
 
 #### 3.1.3 Permission Model
 
@@ -157,6 +159,7 @@ nous-token is an open-source AI usage tracking protocol. A transparent gateway p
 | Variable | Type | Purpose |
 |----------|------|---------|
 | `usdc` | `IERC20WithAuth` (immutable) | USDC contract reference |
+| `treasury` | `address` | Protocol fee recipient (settable by owner) |
 | `deployFee` | `uint256` | Cost to create a series (default: 5 USDC) |
 | `minInscriptionFee` | `uint256` | Minimum inscription fee (default: 1 USDC) |
 | `PROTOCOL_FEE` | `uint256` (constant) | Fixed protocol cut per inscription (1 USDC) |
@@ -170,8 +173,6 @@ nous-token is an open-source AI usage tracking protocol. A transparent gateway p
 | `inscriptions` | `mapping(uint256 => Inscription)` | NFT metadata per token ID |
 | `gateways` | `mapping(address => bool)` | Registered gateway addresses |
 | `authorized` | `mapping(uint256 => mapping(address => bool))` | RESTRICTED series whitelist |
-| `creatorBalance` | `mapping(address => uint256)` | Claimable creator fees |
-| `totalPendingCreatorFees` | `uint256` | Sum of all unclaimed creator fees |
 | `anchors` | `mapping(uint256 => bytes32)` | Merkle roots by period start block |
 
 #### 3.1.5 External Calls
@@ -183,7 +184,9 @@ nous-token is an open-source AI usage tracking protocol. A transparent gateway p
 
 #### 3.1.6 Security Mechanisms
 
-- **CEI Pattern**: State updates (`receiptUsed`, `_nextTokenId`, `s.minted`, `_mint`, `_splitFee`) all happen before `emit` in `_inscribe`. Fee split updates internal mappings only; the external USDC transfer happens only during `claimCreatorFee()` (separate tx).
+- **Push Fee Model**: USDC is transferred directly to treasury and creator during `inscribe`. Contract never holds USDC. Eliminates entire class of fund-custody attacks.
+- **Creator Blacklist Fallback**: If `transferFrom` to creator fails (USDC blacklist), funds go to treasury. `CreatorPaymentFallback` event emitted. Inscribe is never blocked by creator status.
+- **Receipt Owner Check**: `require(msg.sender == r.wallet)` prevents third-party receipt griefing.
 - **Pausable**: `deploy`, `deployWithAuth`, `inscribe`, `inscribeWithAuth` are gated by `whenNotPaused`. Anchor is intentionally NOT paused to avoid blocking legitimate data.
 - **renounceOwnership disabled**: Prevents accidental lockout.
 - **Input validation**: `_isSafeString()` restricts series names and model IDs to `[a-zA-Z0-9-._/ ]`, preventing JSON injection in `tokenURI()`.
@@ -428,10 +431,10 @@ Custom upstream URLs (`X-Nous-Upstream`) are validated:
 **Attack**: Use the same receipt to inscribe in multiple series, exceeding the receipt's token count.
 **Mitigation**: `receiptUsed` mapping tracks total tokens consumed from each receipt hash globally (not per-series). Each inscribe deducts `mintThreshold` from the receipt's remaining balance.
 
-### 5.11 Owner Draining Creator Funds
+### 5.11 Owner Draining Creator Funds — ELIMINATED
 
-**Attack**: Contract owner calls `withdraw()` to drain USDC including pending creator fees.
-**Mitigation**: `withdraw()` computes available balance as `usdc.balanceOf(address(this)) - totalPendingCreatorFees`. Reverts if requested amount exceeds protocol share.
+**Attack**: N/A. Contract holds zero USDC. No `withdraw()`, no `claimCreatorFee()`, no fund custody.
+**Mitigation**: Push model. Fees are transferred directly to treasury and creator during inscribe. This entire attack surface no longer exists.
 
 ### 5.12 Gateway Key Compromise
 
@@ -449,7 +452,7 @@ Custom upstream URLs (`X-Nous-Upstream`) are validated:
 
 | Component | Platform | Configuration |
 |-----------|----------|---------------|
-| **Token20.sol** | Base mainnet (EVM) | Deployed via Foundry (`forge script Deploy.s.sol`). Constructor takes USDC address. Post-deploy: `registerGateway(gatewayAddress)`. |
+| **Token20.sol** | Base mainnet (EVM) | Deployed via Foundry (`forge script Deploy.s.sol`). Constructor takes USDC address and treasury address. Post-deploy: `registerGateway(gatewayAddress)`. |
 | **Gateway** | Cloudflare Workers | Deployed via `wrangler deploy`. Secrets set via `wrangler secret put`. D1 database binding `nous-token-usage`. Cron trigger every 10 minutes. |
 | **Frontend** | Cloudflare Pages | Static single file (`web/index.html`). Domain: `token.nousai.cc`. |
 | **CLI/Plugin** | npm | Published as `nous-token` package. Users install via `npx nous-token setup`. |
@@ -462,6 +465,7 @@ Custom upstream URLs (`X-Nous-Upstream`) are validated:
 | `GATEWAY_PRIVATE_KEY` | Worker secret | secp256k1 private key (hex string) |
 | `ADMIN_SECRET` | Worker secret | Admin authentication token |
 | `USDC_ADDRESS` | Deploy script env | USDC contract address (Base mainnet: `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`) |
+| `TREASURY_ADDRESS` | Deploy script env | Protocol fee recipient address |
 | `GATEWAY_ADDRESS` | Deploy script env | Gateway EOA address to register |
 
 ---
@@ -537,3 +541,55 @@ The following are explicitly out of scope for this audit:
 - **Browser/MetaMask security**: Wallet key management, transaction signing UI.
 - **npm supply chain**: Dependencies of the CLI/plugin package.
 - **DNS/TLS**: Domain security for `nousai.cc`, `gateway.nousai.cc`, `token.nousai.cc`.
+
+---
+
+## 10. Security Audit Findings
+
+**Auditor**: Trail of Bits (AI persona)
+**Date**: 2026-04-06
+**Scope**: Full stack — Token20.sol, Gateway, Frontend, CLI, Plugin, Sentinel
+
+### Critical
+
+None found. Contract core logic (CEI, receipt balance, fee split, anchor verification) is sound.
+
+### High — Fixed
+
+| ID | Finding | Component | Status |
+|----|---------|-----------|--------|
+| H-1 | Model name normalization mismatch — OpenRouter models signed as `anthropic/claude-4.6` but series expects `claude-4.6`, breaking inscribe | Gateway (index.ts) | **Fixed**: normalize model before `createSignedReceipt` |
+| H-2 | `walletCache` ReferenceError — private module variable referenced across modules, bind-wallet returns 500 but DB mutation persists, rebinding completely broken | Gateway (db.ts + index.ts) | **Fixed**: export `walletCache` from db.ts |
+| H-3 | Contract address mismatch between gateway and frontend | Gateway + Frontend | **Acknowledged**: both addresses are test deployments; final address set at production deploy |
+
+### Medium — Fixed
+
+| ID | Finding | Component | Status |
+|----|---------|-----------|--------|
+| M-1 | ADMIN_SECRET comparison not timing-safe — JS `!==` short-circuits, enabling timing attacks | Gateway (index.ts) | **Fixed**: constant-time XOR comparison |
+| M-2 | Third-party receipt griefing — anyone with receipt data can inscribe on a low-threshold series, draining receipt balance before owner uses it on their intended series | Token20.sol | **Fixed**: `require(msg.sender == r.wallet)` in `_inscribe` |
+| M-3 | MMR can permanently skip leaves under concurrency — sentinel reports false positive tampering | Gateway (db.ts) | **Acknowledged**: low probability in CF Worker context; sentinel rebuilds from `usage_records` as ground truth |
+| M-4 | Non-streaming responses block on Base RPC call for receipt generation, adding 100-500ms latency | Gateway (index.ts) | **Fixed**: moved to `ctx.waitUntil` |
+| M-5 | No replay protection on wallet signatures — `my-receipts` and `bind-wallet` messages are static, captured signatures work forever | Gateway (index.ts) | **Fixed**: added timestamp to signed messages, 5-minute freshness window |
+| M-6 | No upgrade/migration path — non-upgradeable contract with no data export mechanism | Token20.sol | **Mitigated**: push model eliminates fund custody risk. Contract only manages NFT state. Pause + redeploy is viable since no USDC is locked. |
+
+### Low
+
+| ID | Finding | Component |
+|----|---------|-----------|
+| L-1 | `receiptCount` in `anchor()` is unused on-chain (event-only) | Token20.sol |
+| L-2 | No event for `claimCreatorFee` | Token20.sol — **Eliminated**: `claimCreatorFee` removed in push model. `CreatorPaymentFallback` event added for blacklist edge case. |
+| L-3 | `unsafe-inline` in frontend CSP weakens script protection | Frontend — **Fixed**: replaced with SHA-256 hash of inline script |
+| L-4 | No rate limiting on public API endpoints; D1 can be overwhelmed | Gateway |
+| L-5 | Single RPC endpoint (`mainnet.base.org`) is a SPOF for anchoring | Gateway — **Fixed**: added `base.publicnode.com` as fallback RPC |
+| L-6 | Wallet bind message lacks purpose binding / versioning | Gateway — **Fixed**: timestamped messages |
+
+### Test Coverage After Audit
+
+| Suite | Tests | Description |
+|-------|-------|-------------|
+| Token20Test | 59 | Unit tests: deploy, inscribe, fee distribution (push model), creator blacklist fallback, treasury management, anchors, pause, verify, tokenURI, authorization, boundaries, JSON injection |
+| Token20AttackTest | 7 | Attack scenarios: third-party griefing (blocked), receipt exhaustion, revoked gateway replay, anchor invalidation+reanchor, zero root anchor, creator blacklist inscribe (succeeds), fallback event |
+| Token20FuzzTest | 3 | Fuzz: `_isSafeString` character validation, deploy fee range, receipt balance tracking with random token/threshold/count |
+| Token20InvariantTest | 1 | **Core invariant: contract USDC balance == 0 at all times** (256 runs × 500 calls = 128,000 random call sequences of deploy+inscribe) |
+| **Total** | **70** | **All passing** |

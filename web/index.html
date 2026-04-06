@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://gateway.nousai.cc https://mainnet.base.org; img-src 'self' data:; frame-ancestors 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-R9IXwEYYfRzNiXSzQHtu6MZxn0FGtjfC9W9ipcjHJns='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://gateway.nousai.cc https://mainnet.base.org; img-src 'self' data:; frame-ancestors 'none'">
 <meta http-equiv="X-Frame-Options" content="DENY">
 <title>NOUS Token — AI Compute Proofs on Base</title>
 <meta name="description" content="Everything you spend on AI becomes an asset you own. Verifiable AI compute proofs on Base.">
@@ -303,7 +303,8 @@ footer a:hover { text-decoration:underline; }
     <button class="modal-close" onclick="closeModal()">&times;</button>
     <div class="modal-title">Connect wallet</div>
     <div style="font-size:13px;color:var(--sage);margin-bottom:20px">Connect your wallet to view your proofs and inscribe new ones.</div>
-    <input class="search-input" id="modalWalletInput" placeholder="0x..." style="font-size:14px;margin-bottom:16px" onkeydown="if(event.key==='Enter')submitModal()">
+    <input class="search-input" id="modalWalletInput" placeholder="0x..." style="font-size:14px;margin-bottom:12px" onkeydown="if(event.key==='Enter')submitModal()">
+    <label style="display:flex;align-items:flex-start;gap:8px;font-size:12px;color:var(--sage);margin-bottom:16px;cursor:pointer"><input type="checkbox" id="tosConsent" style="margin-top:2px;accent-color:var(--teal)"><span>I agree to the <a href="/terms.html" target="_blank">Terms of Service</a> and <a href="/privacy.html" target="_blank">Privacy Notice</a></span></label>
     <button class="btn" style="width:100%" onclick="submitModal()">Connect</button>
   </div>
 </div>
@@ -311,7 +312,9 @@ footer a:hover { text-decoration:underline; }
 <footer>
   <a href="https://github.com/nousworld/nous-token" target="_blank">token-20</a> &middot;
   Verifiable AI compute proofs on Base. &middot;
-  <a href="/terms.html">Terms</a>
+  <a href="/terms.html">Terms</a> &middot;
+  <a href="/privacy.html">Privacy</a> &middot;
+  <a href="/creators.html">Creator Guidelines</a>
 </footer>
 
 <script>
@@ -609,6 +612,8 @@ function isMyRow(id){return myWallet&&id.toLowerCase()===myWallet;}
 function openModal(){document.getElementById('walletModal').classList.add('active');document.getElementById('modalWalletInput').focus();}
 function closeModal(){document.getElementById('walletModal').classList.remove('active');}
 function submitModal(){
+  var consent=document.getElementById('tosConsent');
+  if(!consent.checked){consent.parentElement.style.color='var(--amber)';setTimeout(function(){consent.parentElement.style.color='';},1500);return;}
   var v=document.getElementById('modalWalletInput').value.trim().toLowerCase();
   if(isWallet(v)){setWallet(v);closeModal();}
   else{var inp=document.getElementById('modalWalletInput');inp.style.borderColor='var(--amber)';setTimeout(function(){inp.style.borderColor='';},1500);}

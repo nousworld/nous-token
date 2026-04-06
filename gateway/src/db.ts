@@ -18,7 +18,7 @@ import type { UsageData } from "./providers";
 
 // Isolate-level cache: hash → wallet. Avoids a SELECT on every request.
 // Cleared when Cloudflare recycles the isolate (minutes to hours). Cache miss = one DB read.
-const walletCache = new Map<string, string>();
+export const walletCache = new Map<string, string>();
 
 export interface Env {
   DB: D1Database;

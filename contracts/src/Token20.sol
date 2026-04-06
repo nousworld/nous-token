@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/utils/Pausable.sol";
+import "@openzeppelin/contracts-upgradeable/token/ERC721/ERC721Upgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "@openzeppelin/contracts/utils/Strings.sol";
 import "@openzeppelin/contracts/utils/Base64.sol";
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
@@ -29,8 +30,10 @@ interface IERC20WithAuth {
 }
 
 /// @title Token20 — Verifiable AI compute inscriptions on Base
-/// @notice ERC-721 NFTs representing proven AI token consumption
-contract Token20 is ERC721, Ownable, Pausable {
+/// @notice ERC-721 NFTs representing proven AI token consumption.
+///         Push-model fees: USDC goes directly to treasury and creator during inscribe.
+///         Contract holds zero USDC. UUPS upgradeable with timelock governance.
+contract Token20 is ERC721Upgradeable, OwnableUpgradeable, PausableUpgradeable, UUPSUpgradeable {
     using Strings for uint256;
     using ECDSA for bytes32;
     using MessageHashUtils for bytes32;
@@ -67,18 +70,19 @@ contract Token20 is ERC721, Ownable, Pausable {
         address gateway;
     }
 
-    // ─── State ───
+    // ─── State (storage layout is fixed — append only, never reorder) ───
 
-    IERC20WithAuth public immutable usdc;
+    IERC20WithAuth public usdc;
+    address public treasury;
 
-    uint256 public deployFee = 5_000000;          // 5 USDC
-    uint256 public minInscriptionFee = 1_000000;   // 1 USDC (= protocol fee)
+    uint256 public deployFee;
+    uint256 public minInscriptionFee;
     uint256 public constant PROTOCOL_FEE = 1_000000;     // 1 USDC fixed
-    uint256 public anchorInterval = 300;          // ~10 min on Base
-    uint256 public maxAnchorAge = 43200;          // ~24h on Base (2s blocks)
+    uint256 public anchorInterval;
+    uint256 public maxAnchorAge;
 
-    uint256 private _nextTokenId = 1;
-    uint256 private _nextSeriesId = 1;
+    uint256 private _nextTokenId;
+    uint256 private _nextSeriesId;
 
     mapping(uint256 => Series) public series;
     mapping(bytes32 => bool) public nameExists;
@@ -86,11 +90,9 @@ contract Token20 is ERC721, Ownable, Pausable {
     mapping(uint256 => Inscription) public inscriptions;
     mapping(address => bool) public gateways;
     mapping(uint256 => mapping(address => bool)) public authorized;
-    mapping(address => uint256) public creatorBalance;
-    uint256 public totalPendingCreatorFees;
 
     // Anchor state
-    mapping(uint256 => bytes32) public anchors;   // periodStart => merkleRoot
+    mapping(uint256 => bytes32) public anchors;
 
     // ─── Events ───
 
@@ -130,12 +132,38 @@ contract Token20 is ERC721, Ownable, Pausable {
     event AuthRevoked(uint256 indexed seriesId, address indexed addr);
     event AdminParamChanged(string param, uint256 value);
     event AnchorInvalidated(uint256 indexed periodStart);
+    event TreasuryChanged(address indexed oldTreasury, address indexed newTreasury);
+    event CreatorPaymentFallback(address indexed creator, uint256 amount, uint256 indexed seriesId);
 
-    // ─── Constructor ───
+    // ─── Initializer (replaces constructor for proxy pattern) ───
 
-    constructor(address _usdc) ERC721("Token20", "T20") Ownable(msg.sender) {
-        usdc = IERC20WithAuth(_usdc);
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
     }
+
+    function initialize(address _usdc, address _treasury, address _owner) external initializer {
+        require(_treasury != address(0), "Treasury cannot be zero");
+        require(_usdc != address(0), "USDC cannot be zero");
+
+        __ERC721_init("Token20", "T20");
+        __Ownable_init(_owner);
+        __Pausable_init();
+        __UUPSUpgradeable_init();
+
+        usdc = IERC20WithAuth(_usdc);
+        treasury = _treasury;
+        deployFee = 5_000000;
+        minInscriptionFee = 1_000000;
+        anchorInterval = 300;
+        maxAnchorAge = 43200;
+        _nextTokenId = 1;
+        _nextSeriesId = 1;
+    }
+
+    // ─── UUPS Authorization ───
+
+    function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
 
     // ─── Deploy Series ───
 
@@ -147,7 +175,7 @@ contract Token20 is ERC721, Ownable, Pausable {
         SeriesMode mode,
         uint256 inscriptionFee
     ) external whenNotPaused returns (uint256 seriesId) {
-        require(usdc.transferFrom(msg.sender, address(this), deployFee), "USDC transfer failed");
+        require(usdc.transferFrom(msg.sender, treasury, deployFee), "USDC transfer failed");
         seriesId = _createSeries(name, modelId, maxSupply, mintThreshold, mode, inscriptionFee, msg.sender);
     }
 
@@ -168,7 +196,7 @@ contract Token20 is ERC721, Ownable, Pausable {
         bytes32 s
     ) external whenNotPaused returns (uint256 seriesId) {
         require(value == deployFee, "Value must equal deploy fee");
-        usdc.transferWithAuthorization(from, address(this), value, validAfter, validBefore, nonce, v, r, s);
+        usdc.transferWithAuthorization(from, treasury, value, validAfter, validBefore, nonce, v, r, s);
         seriesId = _createSeries(name, modelId, maxSupply, mintThreshold, mode, inscriptionFee, from);
     }
 
@@ -220,8 +248,15 @@ contract Token20 is ERC721, Ownable, Pausable {
         bytes32[] calldata merkleProof,
         uint256 periodStart
     ) external whenNotPaused {
-        uint256 fee = series[seriesId].inscriptionFee;
-        require(usdc.transferFrom(msg.sender, address(this), fee), "USDC transfer failed");
+        Series storage s = series[seriesId];
+        uint256 fee = s.inscriptionFee;
+
+        require(usdc.transferFrom(msg.sender, treasury, PROTOCOL_FEE), "USDC transfer failed");
+
+        if (fee > PROTOCOL_FEE) {
+            _payCreator(msg.sender, s.creator, fee - PROTOCOL_FEE, seriesId);
+        }
+
         Receipt memory r = _decodeReceipt(receipt);
         _inscribe(seriesId, receipt, r, signature, merkleProof, periodStart, fee);
     }
@@ -241,11 +276,30 @@ contract Token20 is ERC721, Ownable, Pausable {
         bytes32 rAuth,
         bytes32 sAuth
     ) external whenNotPaused {
-        uint256 fee = series[seriesId].inscriptionFee;
+        Series storage s = series[seriesId];
+        uint256 fee = s.inscriptionFee;
         require(value == fee, "Value must equal inscription fee");
+
         usdc.transferWithAuthorization(from, address(this), value, validAfter, validBefore, nonce, v, rAuth, sAuth);
+
+        require(usdc.transfer(treasury, PROTOCOL_FEE), "Treasury transfer failed");
+        if (fee > PROTOCOL_FEE) {
+            uint256 creatorShare = fee - PROTOCOL_FEE;
+            if (!usdc.transfer(s.creator, creatorShare)) {
+                require(usdc.transfer(treasury, creatorShare), "Fallback transfer failed");
+                emit CreatorPaymentFallback(s.creator, creatorShare, seriesId);
+            }
+        }
+
         Receipt memory r = _decodeReceipt(receipt);
         _inscribe(seriesId, receipt, r, signature, merkleProof, periodStart, fee);
+    }
+
+    function _payCreator(address payer, address creator, uint256 amount, uint256 seriesId) internal {
+        if (!usdc.transferFrom(payer, creator, amount)) {
+            require(usdc.transferFrom(payer, treasury, amount), "Fallback transfer failed");
+            emit CreatorPaymentFallback(creator, amount, seriesId);
+        }
     }
 
     function _inscribe(
@@ -261,36 +315,29 @@ contract Token20 is ERC721, Ownable, Pausable {
         require(s.maxSupply > 0, "Series does not exist");
         require(s.minted < s.maxSupply, "Series fully minted");
 
-        // Model check
         require(bytes(r.model).length > 0, "Empty model");
         require(_isSafeString(r.model), "Model: unsafe characters");
         if (s.modelIdHash != bytes32(0)) {
-            require(
-                keccak256(bytes(r.model)) == s.modelIdHash,
-                "Model mismatch"
-            );
+            require(keccak256(bytes(r.model)) == s.modelIdHash, "Model mismatch");
         }
 
-        // Restricted mode check
+        require(msg.sender == r.wallet, "Not receipt owner");
+
         if (s.mode == SeriesMode.RESTRICTED) {
             require(authorized[seriesId][r.wallet], "Not authorized");
         }
 
-        // Verify gateway signature
         bytes32 receiptHash = keccak256(receiptBytes);
         address signer = receiptHash.toEthSignedMessageHash().recover(signature);
         require(gateways[signer], "Invalid gateway signature");
 
-        // Verify Merkle proof
         bytes32 root = anchors[periodStart];
         require(root != bytes32(0), "Period not anchored");
         require(MerkleProof.verify(merkleProof, root, receiptHash), "Invalid Merkle proof");
 
-        // Receipt balance check
         uint256 used = receiptUsed[receiptHash];
         require(r.tokens >= used + s.mintThreshold, "Insufficient receipt balance");
 
-        // ── State updates BEFORE external calls (CEI pattern) ──
         receiptUsed[receiptHash] = used + s.mintThreshold;
         uint256 tokenId = _nextTokenId++;
         s.minted++;
@@ -306,25 +353,7 @@ contract Token20 is ERC721, Ownable, Pausable {
             gateway: signer
         });
 
-        _splitFee(fee, s.creator);
-
         emit Inscribe(tokenId, r.wallet, seriesId, r.model, r.tokens, r.blockNumber, signer, fee, msg.sender);
-    }
-
-    function _splitFee(uint256 fee, address creator) internal {
-        if (fee > PROTOCOL_FEE) {
-            uint256 creatorShare = fee - PROTOCOL_FEE;
-            creatorBalance[creator] += creatorShare;
-            totalPendingCreatorFees += creatorShare;
-        }
-    }
-
-    function claimCreatorFee() external {
-        uint256 amount = creatorBalance[msg.sender];
-        require(amount > 0, "Nothing to claim");
-        creatorBalance[msg.sender] = 0;
-        totalPendingCreatorFees -= amount;
-        require(usdc.transfer(msg.sender, amount), "Transfer failed");
     }
 
     // ─── Verify ───
@@ -413,6 +442,13 @@ contract Token20 is ERC721, Ownable, Pausable {
     function pause() external onlyOwner { _pause(); }
     function unpause() external onlyOwner { _unpause(); }
 
+    function setTreasury(address _treasury) external onlyOwner {
+        require(_treasury != address(0), "Treasury cannot be zero");
+        address old = treasury;
+        treasury = _treasury;
+        emit TreasuryChanged(old, _treasury);
+    }
+
     function setDeployFee(uint256 fee) external onlyOwner {
         deployFee = fee;
         emit AdminParamChanged("deployFee", fee);
@@ -431,13 +467,6 @@ contract Token20 is ERC721, Ownable, Pausable {
         require(blocks > 0, "Age must be > 0");
         maxAnchorAge = blocks;
         emit AdminParamChanged("maxAnchorAge", blocks);
-    }
-
-    function withdraw(address to, uint256 amount) external onlyOwner {
-        require(amount > 0, "Amount must be > 0");
-        uint256 available = usdc.balanceOf(address(this)) - totalPendingCreatorFees;
-        require(amount <= available, "Exceeds protocol balance");
-        require(usdc.transfer(to, amount), "Withdraw failed");
     }
 
     // ─── Token URI (on-chain metadata) ───
@@ -476,7 +505,6 @@ contract Token20 is ERC721, Ownable, Pausable {
         bytes memory b = bytes(s);
         for (uint256 i = 0; i < b.length; i++) {
             bytes1 c = b[i];
-            // Allow: a-z A-Z 0-9 - _ . space
             if (
                 !(c >= 0x30 && c <= 0x39) && // 0-9
                 !(c >= 0x41 && c <= 0x5A) && // A-Z

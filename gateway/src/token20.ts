@@ -23,8 +23,11 @@ import { base } from "viem/chains";
 // ─── Constants ───
 
 const TOKEN20_ADDRESS = "0x95EB768E1A423F5C06Ffd12C93633296563A021c" as Address;
-const BASE_RPC = "https://mainnet.base.org";
+const BASE_RPC_PRIMARY = "https://mainnet.base.org";
+const BASE_RPC_FALLBACK = "https://base.publicnode.com";
 const ANCHOR_INTERVAL = 300; // ~10 min on Base (2s blocks)
+
+
 
 // ─── Types ───
 
@@ -160,32 +163,45 @@ export async function submitAnchor(
 ): Promise<Hex> {
   const account = privateKeyToAccount(privateKey);
 
-  const client = createWalletClient({
-    account,
-    chain: base,
-    transport: http(BASE_RPC),
-  });
+  // Try primary RPC, fall back to secondary
+  for (const rpc of [BASE_RPC_PRIMARY, BASE_RPC_FALLBACK]) {
+    try {
+      const client = createWalletClient({
+        account,
+        chain: base,
+        transport: http(rpc),
+      });
 
-  const hash = await client.writeContract({
-    address: TOKEN20_ADDRESS,
-    abi: TOKEN20_ABI,
-    functionName: "anchor",
-    args: [BigInt(periodStart), merkleRoot as Hex, BigInt(receiptCount)],
-  });
-
-  return hash;
+      return await client.writeContract({
+        address: TOKEN20_ADDRESS,
+        abi: TOKEN20_ABI,
+        functionName: "anchor",
+        args: [BigInt(periodStart), merkleRoot as Hex, BigInt(receiptCount)],
+      });
+    } catch (err) {
+      if (rpc === BASE_RPC_FALLBACK) throw err; // both failed
+      console.warn(`Primary RPC failed for anchor, trying fallback: ${err}`);
+    }
+  }
+  throw new Error("All RPCs failed"); // unreachable
 }
 
 /**
  * Get the current Base block number.
  */
 export async function getCurrentBlock(): Promise<number> {
-  const client = createPublicClient({
-    chain: base,
-    transport: http(BASE_RPC),
-  });
-  const block = await client.getBlockNumber();
-  return Number(block);
+  for (const rpc of [BASE_RPC_PRIMARY, BASE_RPC_FALLBACK]) {
+    try {
+      const client = createPublicClient({
+        chain: base,
+        transport: http(rpc),
+      });
+      return Number(await client.getBlockNumber());
+    } catch (err) {
+      if (rpc === BASE_RPC_FALLBACK) throw err;
+    }
+  }
+  throw new Error("All RPCs failed");
 }
 
 /**
@@ -202,7 +218,7 @@ export function getAnchorPeriod(blockNumber: number): number {
 export async function checkAnchorOnChain(periodStart: number): Promise<Hex> {
   const client = createPublicClient({
     chain: base,
-    transport: http(BASE_RPC),
+    transport: http(BASE_RPC_PRIMARY),
   });
   const result = await client.readContract({
     address: TOKEN20_ADDRESS,

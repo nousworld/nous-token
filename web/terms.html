@@ -25,7 +25,7 @@ a { color: #2A7C6F; }
 <div class="container">
 <a href="/" class="back">&larr; Back to NOUS Token</a>
 <h1>Terms of Service</h1>
-<p class="updated">Last updated: April 5, 2026</p>
+<p class="updated">Last updated: April 6, 2026</p>
 
 <h2>1. What This Service Is</h2>
 <p>NOUS Token ("the Protocol", "we", "us") operates a transparent API gateway at gateway.nousai.cc, a dashboard at token.nousai.cc, and a set of smart contracts on the Base blockchain. The Protocol provides infrastructure for recording, verifying, and inscribing AI usage data on-chain.</p>
@@ -51,7 +51,7 @@ a { color: #2A7C6F; }
 <li><strong>Protocol Fee:</strong> A fixed fee of 1 USDC per inscription, paid to the Protocol. This is a flat service fee for cryptographic signing, Merkle anchoring, and on-chain verification infrastructure.</li>
 <li><strong>Creator Fee:</strong> An amount set independently by the Series Creator, paid entirely and directly to the Series Creator. The Protocol does not receive any portion of the Creator Fee. The Creator Fee is a transaction between you and the Series Creator — the Protocol is not a party to that transaction.</li>
 </ul>
-<p>All fees are collected via USDC through ERC-3009 (transferWithAuthorization) at the time of inscription. The Protocol does not custody, pool, or hold user funds at any point.</p>
+<p>All fees are collected via USDC at the time of inscription, either through direct transfer (ERC-20 transferFrom) or gasless authorization (EIP-3009 transferWithAuthorization). In the EIP-3009 flow, USDC may pass through the smart contract within a single atomic transaction before being distributed to the treasury and creator. Outside of this momentary pass-through, the contract does not custody, pool, or hold user funds.</p>
 
 <h2>4. Series and Series Creators</h2>
 <p>A "Series" is a collection of Token-20 Proofs organized around a specific theme, model, or purpose, deployed by an independent "Series Creator."</p>
@@ -73,7 +73,11 @@ a { color: #2A7C6F; }
 <li>Inscription is a consumption activity — a payment for a cryptographic record — not an investment activity</li>
 </ul>
 
-<h2>5. You Bring Your Own API Key</h2>
+<h2>5. Dispute Resolution Between Creators and Inscribers</h2>
+<p>Any dispute, claim, or disagreement arising between a Series Creator and an inscriber — including but not limited to disputes over Creator Fees, the quality or delivery of any product or service offered by a Creator, or any representations made by a Creator — shall be resolved exclusively between the Creator and the inscriber. The Protocol is not a party to any such dispute and has no obligation to mediate, arbitrate, investigate, or resolve any claim between Creators and inscribers.</p>
+<p>The Protocol's sole obligation with respect to Series is to provide the technical infrastructure for inscription and on-chain recording. The Protocol does not verify, endorse, or guarantee any Creator's identity, reputation, products, services, or fitness for any purpose.</p>
+
+<h2>6. You Bring Your Own API Key</h2>
 <p>We do not sell, provide, or manage API keys. You must have your own valid API key from the AI provider you wish to use. Your API key is hashed for pseudonymous identification — we never store your key in plaintext.</p>
 <p>You are responsible for:</p>
 <ul>
@@ -83,7 +87,7 @@ a { color: #2A7C6F; }
 <li>Any consequences of routing your API calls through a third-party proxy</li>
 </ul>
 
-<h2>6. Privacy by Structure</h2>
+<h2>7. Privacy by Structure</h2>
 <p>The gateway pipes request and response bodies directly between you and the AI provider. It does not parse, store, or log conversation content. This is verifiable by auditing the <a href="https://github.com/nousworld/nous-token" target="_blank">open-source code</a>.</p>
 <p>What we do record:</p>
 <ul>
@@ -94,10 +98,22 @@ a { color: #2A7C6F; }
 </ul>
 <p>This usage data is publicly queryable via the dashboard and API. By using the gateway, you consent to your usage metadata being visible on the leaderboard and through the API.</p>
 
-<h2>7. Wallet Binding</h2>
+<h2>8. Wallet Binding</h2>
 <p>When you associate a wallet address with your usage, this binding is recorded and may be difficult or impossible to change. Verify your wallet address carefully before binding. We are not responsible for usage attributed to an incorrect wallet address.</p>
 
-<h2>8. Blockchain Interactions</h2>
+<h2>9. Smart Contract Administration</h2>
+<p>The Token20 smart contract is administered by an owner address. In the interest of transparency, the following administrative functions exist and may be exercised by the contract owner:</p>
+<ul>
+<li><strong>Pause / Unpause:</strong> The owner may temporarily halt all deployments and inscriptions. This is a safety mechanism intended for use only in emergencies (e.g., a discovered vulnerability).</li>
+<li><strong>Treasury Address:</strong> The owner may change the address that receives protocol fees. This is not immutable — however, any change is recorded on-chain via the TreasuryChanged event and is publicly auditable.</li>
+<li><strong>Gateway Registration:</strong> The owner may add or remove gateway addresses authorized to sign receipts and submit anchors. Revoking a gateway means future receipts from that gateway will not be accepted by the contract.</li>
+<li><strong>Anchor Invalidation:</strong> The owner may invalidate an anchored period. This is a safety mechanism intended for use only if a gateway submits a fraudulent or erroneous Merkle root. Invalidation does not affect already-minted NFTs.</li>
+<li><strong>Fee Adjustment:</strong> The owner may change the deploy fee and minimum inscription fee. The protocol fee (1 USDC) is a constant and cannot be changed by anyone. Fee changes do not apply retroactively — they affect only future transactions.</li>
+<li><strong>Ownership Transfer:</strong> The owner may transfer ownership to a new address. Ownership cannot be renounced (this is intentionally disabled to prevent the contract from becoming unmanageable).</li>
+</ul>
+<p>All administrative actions emit on-chain events and are verifiable by anyone. The contract source code is publicly available and verified on Basescan.</p>
+
+<h2>10. Blockchain Interactions</h2>
 <p>The service enables optional on-chain operations on the Base network (Layer 2 on Ethereum), including storing usage proofs and minting ERC-721 tokens. By initiating any on-chain transaction, you acknowledge:</p>
 <ul>
 <li>Blockchain transactions are irreversible</li>
@@ -107,19 +123,19 @@ a { color: #2A7C6F; }
 <li>We are not a custodian — we never have access to your wallet, private keys, or funds</li>
 </ul>
 
-<h2>9. Receipt Accuracy</h2>
+<h2>11. Receipt Accuracy</h2>
 <p>Usage receipts reflect the token counts reported by the AI provider in their API response. We sign what the provider reports — we do not independently count tokens. If a provider reports incorrect token counts, the receipt will reflect that inaccuracy. We are not responsible for discrepancies in provider-reported usage data.</p>
 
-<h2>10. Third-Party Services</h2>
+<h2>12. Third-Party Services</h2>
 <p>The gateway proxies requests to third-party AI providers. We are not affiliated with, endorsed by, or responsible for these providers. We do not guarantee their availability, accuracy, or compliance with any regulations. If a provider changes their terms, restricts proxy usage, or revokes your API key, that is between you and the provider.</p>
 
-<h2>11. No Warranty</h2>
+<h2>13. No Warranty</h2>
 <p class="caps">The service is provided "as is" and "as available" without warranties of any kind, express or implied, including but not limited to warranties of merchantability, fitness for a particular purpose, accuracy, or non-infringement. We do not guarantee that the service will be uninterrupted, error-free, or secure.</p>
 
-<h2>12. Limitation of Liability</h2>
+<h2>14. Limitation of Liability</h2>
 <p class="caps">To the maximum extent permitted by law, we shall not be liable for any indirect, incidental, special, consequential, or punitive damages, or any loss of profits, data, or goodwill, arising from your use of the service. Our total liability for any claim shall not exceed the amount of Protocol Fees you have paid in the twelve (12) months preceding the claim, or $100 USD, whichever is greater.</p>
 
-<h2>13. Assumption of Risk</h2>
+<h2>15. Assumption of Risk</h2>
 <p>You acknowledge that:</p>
 <ul>
 <li>Cryptocurrency and blockchain technology involve inherent risks</li>
@@ -130,7 +146,18 @@ a { color: #2A7C6F; }
 <li>You have not relied on any statement by the Protocol or any Series Creator as investment advice</li>
 </ul>
 
-<h2>14. Prohibited Use</h2>
+<h2>16. Anti-Money Laundering and Sanctions Compliance</h2>
+<p>You represent and warrant that:</p>
+<ul>
+<li>You are not located in, or a resident of, any country or territory subject to comprehensive U.S. sanctions (including but not limited to Cuba, Iran, North Korea, Syria, and the Crimea, Donetsk, and Luhansk regions of Ukraine)</li>
+<li>You are not listed on the U.S. Treasury Department's Specially Designated Nationals (SDN) List, the U.S. Commerce Department's Denied Persons List, or any similar sanctions or restricted persons list maintained by any government authority</li>
+<li>You will not use the Protocol to launder money, finance terrorism, or facilitate any other financial crime</li>
+<li>You will not use self-dealing, structuring, layering, or any other technique to disguise the origin, nature, or destination of funds through the Protocol</li>
+<li>You will not create multiple wallets or accounts for the purpose of circumventing transaction monitoring or sanctions screening</li>
+</ul>
+<p>The Protocol reserves the right to implement wallet screening, transaction monitoring, and other compliance measures at any time. The Protocol may refuse service to, block transactions from, or freeze interactions with any wallet address that the Protocol reasonably believes is associated with prohibited activity, sanctioned persons, or jurisdictions subject to sanctions. No prior notice is required.</p>
+
+<h2>17. Prohibited Use</h2>
 <p>You may not use the service to:</p>
 <ul>
 <li>Violate any applicable law or regulation</li>
@@ -140,18 +167,20 @@ a { color: #2A7C6F; }
 <li>Attempt to manipulate usage data, receipts, or Merkle proofs</li>
 <li>Market, promote, or sell Token-20 Proofs as investment products or securities</li>
 <li>Promise or imply financial returns to prospective inscribers of any Series</li>
+<li>Launder money, structure transactions to evade reporting, or use the Protocol to process proceeds of any unlawful activity</li>
+<li>Deploy a Series with the intent of facilitating self-dealing, wash trading, or artificial transaction volume</li>
 </ul>
 
-<h2>15. Modification</h2>
+<h2>18. Modification</h2>
 <p>We may update these terms at any time. Continued use of the service after changes constitutes acceptance. Material changes will be noted by updating the date at the top of this page.</p>
 
-<h2>16. Severability</h2>
+<h2>19. Severability</h2>
 <p>If any provision of these terms is found to be unenforceable, the remaining provisions shall continue in full force and effect.</p>
 
-<h2>17. Governing Law</h2>
-<p>These terms shall be governed by the laws of the jurisdiction in which the service operator is incorporated, without regard to conflict of law principles.</p>
+<h2>20. Governing Law</h2>
+<p>These terms shall be governed by the laws of England and Wales, without regard to conflict of law principles. Any dispute arising under these terms shall be subject to the exclusive jurisdiction of the courts of England and Wales. This choice of law does not affect any mandatory consumer protection rights you may have under the laws of your country of residence.</p>
 
-<h2>18. Contact</h2>
+<h2>21. Contact</h2>
 <p>Questions about these terms: <a href="https://github.com/nousworld/nous-token" target="_blank">github.com/nousworld/nous-token</a></p>
 
 </div>
