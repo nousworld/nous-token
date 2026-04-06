@@ -839,7 +839,7 @@ async function handleT20API(request: Request, url: URL, env: Env): Promise<Respo
       if (bearer && bearer.includes(".")) {
         const signingKey = await getSigningKey(env);
         if (signingKey) {
-          wallet = await verifyWalletJWT(signingKey, bearer);
+          wallet = await verifyWalletJWT(env, bearer);
         }
       }
     }
@@ -910,9 +910,9 @@ async function handleT20API(request: Request, url: URL, env: Env): Promise<Respo
         return json({ error: "Invalid signature" }, 403);
       }
 
-      // Issue JWT — 1 hour expiry
-      const jwt = await createWalletJWT(signingKey, wallet, now + 3600);
-      return json({ ok: true, token: jwt, wallet, expires_in: 3600 });
+      // Issue JWT — 24 hour expiry
+      const jwt = await createWalletJWT(env, wallet, now + 86400);
+      return json({ ok: true, token: jwt, wallet, expires_in: 86400 });
     } catch {
       return json({ error: "Auth failed" }, 500);
     }
@@ -958,7 +958,7 @@ async function handleT20API(request: Request, url: URL, env: Env): Promise<Respo
     const bearerVal = authHeaderVal.replace(/^Bearer\s+/i, "").trim();
     if (bearerVal && bearerVal.includes(".")) {
       const signingKey = await getSigningKey(env);
-      if (signingKey) wallet = await verifyWalletJWT(signingKey, bearerVal);
+      wallet = await verifyWalletJWT(env, bearerVal);
     }
 
     if (!wallet) {
@@ -1186,27 +1186,36 @@ function timingSafeEqual(a: string, b: string): boolean {
   return result === 0;
 }
 
-// ── JWT Helpers (compact, HMAC-based using SIGNING_KEY) ──
+// ── JWT Helpers (compact, HMAC-based) ──
+// HMAC key derived deterministically from SIGNING_KEY's raw bytes via SHA-256.
+// ECDSA signing is non-deterministic (random k), so we export the key and hash it instead.
 
-async function createWalletJWT(signingKey: CryptoKey, wallet: string, exp: number): Promise<string> {
+let cachedHmacKey: CryptoKey | null = null;
+
+async function getHmacKey(env: Env): Promise<CryptoKey | null> {
+  if (cachedHmacKey) return cachedHmacKey;
+  if (!env.SIGNING_KEY) return null;
+  // Derive HMAC key deterministically from the JWK string (never changes for same key)
+  const seed = new TextEncoder().encode("nous-token-jwt:" + env.SIGNING_KEY);
+  const hashBuf = await crypto.subtle.digest("SHA-256", seed);
+  cachedHmacKey = await crypto.subtle.importKey(
+    "raw", hashBuf, { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"]
+  );
+  return cachedHmacKey;
+}
+
+async function createWalletJWT(env: Env, wallet: string, exp: number): Promise<string> {
   const header = btoa(JSON.stringify({ alg: "HS256", typ: "JWT" })).replace(/=+$/, "");
   const payload = btoa(JSON.stringify({ sub: wallet, exp })).replace(/=+$/, "");
   const data = `${header}.${payload}`;
-  // Derive HMAC key from ECDSA signing key by signing a fixed seed
-  const hmacKeyBuf = await crypto.subtle.sign(
-    { name: "ECDSA", hash: "SHA-256" },
-    signingKey,
-    new TextEncoder().encode("nous-token-jwt-hmac-seed")
-  );
-  const hmacKey = await crypto.subtle.importKey(
-    "raw", hmacKeyBuf, { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"]
-  );
+  const hmacKey = await getHmacKey(env);
+  if (!hmacKey) throw new Error("SIGNING_KEY not configured");
   const sigBuf = await crypto.subtle.sign("HMAC", hmacKey, new TextEncoder().encode(data));
   const sig = btoa(String.fromCharCode(...new Uint8Array(sigBuf))).replace(/=+$/, "").replace(/\+/g, "-").replace(/\//g, "_");
   return `${data}.${sig}`;
 }
 
-async function verifyWalletJWT(signingKey: CryptoKey, token: string): Promise<string> {
+async function verifyWalletJWT(env: Env, token: string): Promise<string> {
   try {
     const parts = token.split(".");
     if (parts.length !== 3) return "";
@@ -1214,15 +1223,8 @@ async function verifyWalletJWT(signingKey: CryptoKey, token: string): Promise<st
     const data = `${parts[0]}.${parts[1]}`;
     const sig = Uint8Array.from(atob(parts[2].replace(/-/g, "+").replace(/_/g, "/")), c => c.charCodeAt(0));
 
-    const hmacKeyBuf = await crypto.subtle.sign(
-      { name: "ECDSA", hash: "SHA-256" },
-      signingKey,
-      new TextEncoder().encode("nous-token-jwt-hmac-seed")
-    );
-    const hmacKey = await crypto.subtle.importKey(
-      "raw", hmacKeyBuf, { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"]
-    );
-
+    const hmacKey = await getHmacKey(env);
+    if (!hmacKey) return "";
     const valid = await crypto.subtle.verify("HMAC", hmacKey, sig, new TextEncoder().encode(data));
     if (!valid) return "";
 
